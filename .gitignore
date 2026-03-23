@@ -1,0 +1,16 @@
+# Entornos virtuales
+venv/
+env/
+
+# Archivos compilados de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Archivos de sistema operativo
+.DS_Store
+Thumbs.db
+
+# Si más adelante usas variables de entorno para contraseñas/APIs
+.env
+.vscode
