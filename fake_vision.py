@@ -41,7 +41,7 @@ def run_vision():
     poller = zmq.Poller()
     poller.register(socket_motor, zmq.POLLIN)
     poller.register(socket_control, zmq.POLLIN)
-
+    
     while True:
         socks = dict(poller.poll())
 
@@ -74,16 +74,16 @@ def run_vision():
                             human_hand.remove(t)
                             tile = t if t[1] == l_val else (t[1], t[0])
                             board.insert(0, tile)
-                            # Posición simulada de la jugada humana (desplazada en el tapete)
-                            board_poses[f"{tile[0]}_{tile[1]}"] = {"x": min_x - 0.08, "y": 0.3, "theta": 90.0}
+                            # Posición simulada de la jugada humana (desplazada 6 cm en el tapete)
+                            board_poses[f"{tile[0]}_{tile[1]}"] = {"x": min_x - 0.06, "y": 0.3, "theta": 90.0}
                             played = True
                             break
                         elif t[0] == r_val or t[1] == r_val:
                             human_hand.remove(t)
                             tile = t if t[0] == r_val else (t[1], t[0])
                             board.append(tile)
-                            # Posición simulada de la jugada humana
-                            board_poses[f"{tile[0]}_{tile[1]}"] = {"x": max_x + 0.08, "y": 0.3, "theta": 90.0}
+                            # Posición simulada de la jugada humana (desplazada 6 cm en el tapete)
+                            board_poses[f"{tile[0]}_{tile[1]}"] = {"x": max_x + 0.06, "y": 0.3, "theta": 90.0}
                             played = True
                             break
                 if not played and all_dominoes:

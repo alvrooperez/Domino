@@ -43,11 +43,12 @@ class DominoControlPanel:
 
         # Canvas principal
         self.canvas = tk.Canvas(self.root, width=1150, height=600, bg="#2d5a27", highlightthickness=0)
-        self.canvas.pack(pady=5)
+        self.canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        self.canvas.bind("<Configure>", lambda e: self.render())
 
         # Panel de Botones
         btn_frame = tk.Frame(self.root, bg="#1e1e1e")
-        btn_frame.pack(fill="x", padx=20)
+        btn_frame.pack(side=tk.BOTTOM, fill="x", padx=20, pady=20)
 
         tk.Button(btn_frame, text="🔍 ESCANEAR MESA", command=self.update_from_vision, 
                   bg="#4a4a4a", fg="white", font=("Arial", 10, "bold"), width=16).pack(side="left", padx=5)
@@ -87,10 +88,15 @@ class DominoControlPanel:
         
         self.canvas.create_text(20, 20, text="MESA DE TRABAJO (Vista Superior):", fill="white", anchor="w", font=("Arial", 10, "bold"))
         
+        # Obtenemos el tamaño real actual del canvas en la pantalla
+        c_w = self.canvas.winfo_width()
+        c_h = self.canvas.winfo_height()
+        if c_w < 100: c_w = 1150 # Prevención antes de que la ventana cargue
+        if c_h < 100: c_h = 600
+
         # Función para mapear metros físicos a píxeles del Canvas
         def map_coords(x_meters, y_meters):
-            # Asumimos una mesa de 1x1 metros. X -> 1050px de ancho, Y -> 500px de alto
-            return 50 + (x_meters * 1050), 50 + (y_meters * 500)
+            return 50 + (x_meters * (c_w - 100)), 50 + (y_meters * (c_h - 100))
 
         for t in self.board:
             t_str = f"{t[0]}_{t[1]}"
@@ -106,7 +112,7 @@ class DominoControlPanel:
             px, py = map_coords(pose["x"], pose["y"])
             self._draw_tile(px, py, t, "#cfcfcf", pose["theta"])
         
-        self.canvas.create_text(20, 570, text=f"FICHAS JUGADOR 2: {self.human_hand_count}", fill="yellow", anchor="w", font=("Arial", 10, "bold"))
+        self.canvas.create_text(20, c_h - 30, text=f"FICHAS JUGADOR 2: {self.human_hand_count}", fill="yellow", anchor="w", font=("Arial", 10, "bold"))
         
         self.root.update_idletasks() # Forzar dibujado antes de seguir
 
@@ -187,9 +193,17 @@ class DominoControlPanel:
             # Coordenada origen: Cualquier ficha disponible en el pozo
             grab = list(self.boneyard_poses.values())[-1] if self.boneyard_poses else {"x": 0.8, "y": 0.1, "theta": 0.0}
             
-            # Coordenada destino: Buscamos la posición más a la derecha en la mano del robot y sumamos 8cm
-            max_x = max(p["x"] for p in self.robot_hand_poses.values()) if self.robot_hand_poses else 0.1
-            place = {"x": max_x + 0.08, "y": 0.8, "theta": 0.0}
+            # Coordenada destino: Buscamos el primer hueco libre en la mano del robot
+            occupied_x = [p["x"] for p in self.robot_hand_poses.values()]
+            target_x = 0.2
+            for i in range(20): # Límite máximo de 20 fichas en mano
+                candidate_x = 0.2 + (i * 0.08)
+                # Si ningún valor X ocupado está cerca (margen de 2cm), hemos encontrado el hueco
+                if not any(abs(ox - candidate_x) < 0.02 for ox in occupied_x):
+                    target_x = candidate_x
+                    break
+            
+            place = {"x": target_x, "y": 0.8, "theta": 0.0}
             
             print(f"[UI] Decisión: Robar. Ir a X:{grab['x']:.2f}, dejar en X:{place['x']:.2f}")
             self.control_sock.send_string(json.dumps({
@@ -225,12 +239,12 @@ class DominoControlPanel:
         
         for i, t in enumerate(self.hand):
             if t[0] == l_v or t[1] == l_v: 
-                # Calculamos destino basándonos en el extremo izquierdo (-8 cm en X)
-                place = {"x": l_pose["x"] - 0.08, "y": l_pose["y"], "theta": 90.0}
+                # Calculamos destino basándonos en el extremo izquierdo (-6 cm en X)
+                place = {"x": l_pose["x"] - 0.06, "y": l_pose["y"], "theta": 90.0}
                 return {"action": "MOVE", "tile": t, "side": "L", "place_pose": place}
             if t[0] == r_v or t[1] == r_v: 
-                # Calculamos destino basándonos en el extremo derecho (+8 cm en X)
-                place = {"x": r_pose["x"] + 0.08, "y": r_pose["y"], "theta": 90.0}
+                # Calculamos destino basándonos en el extremo derecho (+6 cm en X)
+                place = {"x": r_pose["x"] + 0.06, "y": r_pose["y"], "theta": 90.0}
                 return {"action": "MOVE", "tile": t, "side": "R", "place_pose": place}
         return None
 
