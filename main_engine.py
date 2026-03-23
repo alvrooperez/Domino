@@ -18,6 +18,7 @@ class DominoControlPanel:
         self.hand = []
         self.robot_hand_poses = {}
         self.board_poses = {}
+        self.boneyard_poses = {}
         self.turn = "ROBOT" # Puede ser "ROBOT" o "HUMANO"
         self.human_hand_count = 0
         self.is_running = False
@@ -25,7 +26,7 @@ class DominoControlPanel:
         # --- Interfaz Tkinter ---
         self.root = tk.Tk()
         self.root.title("UR3e Domino Controller")
-        self.root.geometry("1000x550")
+        self.root.geometry("1200x800")
         self.root.configure(bg="#1e1e1e")
 
         self._setup_ui()
@@ -41,7 +42,7 @@ class DominoControlPanel:
         self.lbl_turn.pack(pady=10)
 
         # Canvas principal
-        self.canvas = tk.Canvas(self.root, width=950, height=350, bg="#2d5a27", highlightthickness=0)
+        self.canvas = tk.Canvas(self.root, width=1150, height=600, bg="#2d5a27", highlightthickness=0)
         self.canvas.pack(pady=5)
 
         # Panel de Botones
@@ -62,36 +63,50 @@ class DominoControlPanel:
         tk.Button(btn_frame, text="🛑 PARAR", command=self.emergency_stop, 
                   bg="#dc3545", fg="white", font=("Arial", 10, "bold"), width=10).pack(side="right", padx=5)
 
-    def _draw_tile(self, x, y, t, color="#eee"):
-        self.canvas.create_rectangle(x, y, x+40, y+60, fill=color, outline="black", width=2)
-        self.canvas.create_text(x+20, y+15, text=str(t[0]), font=("Arial", 12, "bold"), fill="black")
-        self.canvas.create_line(x+5, y+30, x+35, y+30, fill="black")
-        self.canvas.create_text(x+20, y+45, text=str(t[1]), font=("Arial", 12, "bold"), fill="black")
+    def _draw_tile(self, px, py, t, color="#eee", theta=0.0):
+        # px, py representan el centro geométrico de la ficha en la pantalla
+        if abs(theta) == 90 or abs(theta) == 270:
+            # Orientación HORIZONTAL
+            x1, y1 = px - 30, py - 20
+            x2, y2 = px + 30, py + 20
+            self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="black", width=2)
+            self.canvas.create_text(px - 15, py, text=str(t[0]), font=("Arial", 12, "bold"), fill="black")
+            self.canvas.create_line(px, py - 20, px, py + 20, fill="black")
+            self.canvas.create_text(px + 15, py, text=str(t[1]), font=("Arial", 12, "bold"), fill="black")
+        else:
+            # Orientación VERTICAL
+            x1, y1 = px - 20, py - 30
+            x2, y2 = px + 20, py + 30
+            self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="black", width=2)
+            self.canvas.create_text(px, py - 15, text=str(t[0]), font=("Arial", 12, "bold"), fill="black")
+            self.canvas.create_line(px - 20, py, px + 20, py, fill="black")
+            self.canvas.create_text(px, py + 15, text=str(t[1]), font=("Arial", 12, "bold"), fill="black")
 
     def render(self):
         self.canvas.delete("all")
         
-        # Dibujar Tablero
-        self.canvas.create_text(20, 20, text="TABLERO REAL:", fill="white", anchor="w", font=("Arial", 10, "bold"))
-        x_m, y_m = 50, 40
-        for t in self.board:
-            self._draw_tile(x_m, y_m, t, "white")
-            x_m += 50
-            if x_m > 880: # Salto de línea si llegamos al borde derecho
-                x_m = 50
-                y_m += 70
-
-        # Dibujar Mano
-        self.canvas.create_text(20, y_m + 80, text=f"MANO ROBOT ({len(self.hand)} fichas):", fill="white", anchor="w", font=("Arial", 10, "bold"))
-        x_h, y_h = 50, y_m + 100
-        for t in self.hand:
-            self._draw_tile(x_h, y_h, t, "#cfcfcf")
-            x_h += 45
-            if x_h > 880:
-                x_h = 50
-                y_h += 70
+        self.canvas.create_text(20, 20, text="MESA DE TRABAJO (Vista Superior):", fill="white", anchor="w", font=("Arial", 10, "bold"))
         
-        self.canvas.create_text(20, y_h + 80, text=f"FICHAS JUGADOR 2: {self.human_hand_count}", fill="yellow", anchor="w", font=("Arial", 10, "bold"))
+        # Función para mapear metros físicos a píxeles del Canvas
+        def map_coords(x_meters, y_meters):
+            # Asumimos una mesa de 1x1 metros. X -> 1050px de ancho, Y -> 500px de alto
+            return 50 + (x_meters * 1050), 50 + (y_meters * 500)
+
+        for t in self.board:
+            t_str = f"{t[0]}_{t[1]}"
+            if t_str not in self.board_poses: t_str = f"{t[1]}_{t[0]}"
+            pose = self.board_poses.get(t_str, {"x": 0.5, "y": 0.3, "theta": 90.0})
+            px, py = map_coords(pose["x"], pose["y"])
+            self._draw_tile(px, py, t, "white", pose["theta"])
+
+        for t in self.hand:
+            t_str = f"{t[0]}_{t[1]}"
+            if t_str not in self.robot_hand_poses: t_str = f"{t[1]}_{t[0]}"
+            pose = self.robot_hand_poses.get(t_str, {"x": 0.1, "y": 0.8, "theta": 0.0})
+            px, py = map_coords(pose["x"], pose["y"])
+            self._draw_tile(px, py, t, "#cfcfcf", pose["theta"])
+        
+        self.canvas.create_text(20, 570, text=f"FICHAS JUGADOR 2: {self.human_hand_count}", fill="yellow", anchor="w", font=("Arial", 10, "bold"))
         
         self.root.update_idletasks() # Forzar dibujado antes de seguir
 
@@ -102,6 +117,7 @@ class DominoControlPanel:
         self.hand = data["robot_hand"]
         self.robot_hand_poses = data.get("robot_hand_poses", {})
         self.board_poses = data.get("board_poses", {})
+        self.boneyard_poses = data.get("boneyard_poses", {})
         self.human_hand_count = data.get("human_hand_count", 0)
         self.render()
         return data["boneyard_empty"]
@@ -168,8 +184,19 @@ class DominoControlPanel:
             self.control_sock.send_string(json.dumps(move))
             self.control_sock.recv_string() # Esperar a que el UR3e termine (congelará UI 2seg)
         elif not boneyard_empty:
-            print("[UI] Decisión: Robar")
-            self.control_sock.send_string(json.dumps({"action": "STEAL"}))
+            # Coordenada origen: Cualquier ficha disponible en el pozo
+            grab = list(self.boneyard_poses.values())[-1] if self.boneyard_poses else {"x": 0.8, "y": 0.1, "theta": 0.0}
+            
+            # Coordenada destino: Buscamos la posición más a la derecha en la mano del robot y sumamos 8cm
+            max_x = max(p["x"] for p in self.robot_hand_poses.values()) if self.robot_hand_poses else 0.1
+            place = {"x": max_x + 0.08, "y": 0.8, "theta": 0.0}
+            
+            print(f"[UI] Decisión: Robar. Ir a X:{grab['x']:.2f}, dejar en X:{place['x']:.2f}")
+            self.control_sock.send_string(json.dumps({
+                "action": "STEAL",
+                "grab_pose": grab,
+                "place_pose": place
+            }))
             self.control_sock.recv_string() # Esperar (congelará UI 3seg)
         else:
             print("[UI] Bloqueado. Fin.")
@@ -193,17 +220,17 @@ class DominoControlPanel:
         # Extraemos las coordenadas de las fichas en los extremos del tablero
         l_tile = f"{self.board[0][0]}_{self.board[0][1]}"
         r_tile = f"{self.board[-1][0]}_{self.board[-1][1]}"
-        l_pose = self.board_poses.get(l_tile, {"x": 0.5, "y": 0.5, "theta": 0.0})
-        r_pose = self.board_poses.get(r_tile, {"x": 0.5, "y": 0.5, "theta": 0.0})
+        l_pose = self.board_poses.get(l_tile, {"x": 0.5, "y": 0.3, "theta": 90.0})
+        r_pose = self.board_poses.get(r_tile, {"x": 0.5, "y": 0.3, "theta": 90.0})
         
         for i, t in enumerate(self.hand):
             if t[0] == l_v or t[1] == l_v: 
-                # Calculamos destino basándonos en el extremo izquierdo (+5 cm en Y)
-                place = {"x": l_pose["x"], "y": l_pose["y"] + 0.05, "theta": 90.0}
+                # Calculamos destino basándonos en el extremo izquierdo (-8 cm en X)
+                place = {"x": l_pose["x"] - 0.08, "y": l_pose["y"], "theta": 90.0}
                 return {"action": "MOVE", "tile": t, "side": "L", "place_pose": place}
             if t[0] == r_v or t[1] == r_v: 
-                # Calculamos destino basándonos en el extremo derecho (-5 cm en Y)
-                place = {"x": r_pose["x"], "y": r_pose["y"] - 0.05, "theta": 90.0}
+                # Calculamos destino basándonos en el extremo derecho (+8 cm en X)
+                place = {"x": r_pose["x"] + 0.08, "y": r_pose["y"], "theta": 90.0}
                 return {"action": "MOVE", "tile": t, "side": "R", "place_pose": place}
         return None
 

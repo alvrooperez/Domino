@@ -66,6 +66,10 @@ Debe responder enviando un JSON con la siguiente estructura exacta:
     "6_6": {"x": 0.50, "y": 0.50, "theta": 0.0},
     "6_4": {"x": 0.55, "y": 0.50, "theta": 90.0}
   },
+  "boneyard_poses": {
+    "0_1": {"x": 0.80, "y": 0.10, "theta": 0.0},
+    "2_3": {"x": 0.85, "y": 0.10, "theta": 0.0}
+  },
   "human_hand_count": 5,
   "boneyard_empty": false
 }
@@ -107,7 +111,9 @@ El Motor te enviará un string JSON. Debes decodificarlo y actuar en consecuenci
 **Comando de Robo (STEAL):**
 ```json
 {
-  "action": "STEAL"
+  "action": "STEAL",
+  "grab_pose": {"x": 0.80, "y": 0.10, "theta": 0.0},
+  "place_pose": {"x": 0.70, "y": 0.80, "theta": 0.0}
 }
 ```
 

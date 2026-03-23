@@ -29,10 +29,12 @@ def run_control():
             socket_vision_update.recv_string() # Esperamos confirmación de visión
 
         elif cmd["action"] == "STEAL":
-            print("[UR3e] Robando ficha del pozo...")
+            grab = cmd.get("grab_pose", {"x": 0.0, "y": 0.0, "theta": 0.0})
+            place = cmd.get("place_pose", {"x": 0.0, "y": 0.0, "theta": 0.0})
+            print(f"[UR3e] 1. RECOGER (POZO): Moviendo TCP a X:{grab['x']:.2f}, Y:{grab['y']:.2f}")
+            print(f"[UR3e] 2. SOLTAR (MANO): Moviendo TCP a X:{place['x']:.2f}, Y:{place['y']:.2f}")
             time.sleep(3)
-            # Avisamos a la visión para que "vea" la nueva ficha en la mano
-            socket_vision_update.send_string(json.dumps({"action": "STEAL"}))
+            socket_vision_update.send_string(json.dumps(cmd)) # Pasamos las coordenadas a la visión
             socket_vision_update.recv_string()
 
         # Respondemos al motor que el brazo ha terminado
