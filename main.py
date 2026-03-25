@@ -12,6 +12,7 @@ def main():
     try:
         # 2. Conectar al robot
         robot.connect()
+        robot.actuate_digital_output(DIGITAL_OUTPUT_PIN, False)
         
         # 3. Moverse secuencialmente por posiciones fijas (Articular)
         print("\n--- Ejecutando Rutina de Movimientos Articulares ---")
@@ -21,30 +22,26 @@ def main():
         
         
         # Ejemplo de bajar hasta hacer contacto (Comentado al igual que en tu original)
-        '''
+        #'''
         print("\n--- Buscando contacto en Z ---")
         speed_down = [0, 0, -0.05, 0, 0, 0]
         if robot.move_until_contact(speed_down):
             robot.actuate_digital_output(DIGITAL_OUTPUT_PIN, True)
             time.sleep(1.0)
-        '''
+        #'''
 
         # 4. Modificar la posición actual y usar MoveL
         print("\n--- Elevando 10 cm desde la posición actual ---")
         tcp_pose = robot.get_current_pose()
-        tcp_pose[2] -= 0.10  # Cambiando la altura en Z
+        tcp_pose[2] += 0.30  # Cambiando la altura en Z
         robot.move_linear(tcp_pose, speed=0.1, acceleration=0.5)
         
-        # 5. Volver a mover a "comoda" usando MoveJ manual cambiando orientación
-        print("\n--- Desplazamiento lateral desde posición cómoda ---")
-        new_q = robot.fixed_joint_positions["comoda"][:]
-        new_q[0] -= 3.14159  # Cambiar orientación de la base
-        robot.move_joint(new_q)
+        
 
         # 6. Actuar salida digital finalizando tarea
+        robot.actuate_digital_output(DIGITAL_OUTPUT_PIN, True)
+        time.sleep(5)
         robot.actuate_digital_output(DIGITAL_OUTPUT_PIN, False)
-        time.sleep(0.2)
-        
         # Detener
         robot.stop_script()
         print("\nPrograma terminado con éxito.")
