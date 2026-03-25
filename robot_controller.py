@@ -19,7 +19,7 @@ class RobotController:
             "home": [1.45677137, -1.61379637, 0.03687411, -1.53243818, 0.12954740, -0.47554523],
             "q2": [1.38072347, -1.69596066, 0.17434245, -1.63875736, -1.50716430, -0.43589860],
             "comoda": [1.38097023, -1.64333977, 1.61802417, -1.54438673, -1.52174121, -0.43589860],
-            "tablero": [4.7277, -1.5772, 0.2913, -0.5383, -1.6497, 5.8074]
+            "tablero": [4.7277, -1.5772, 0.2913, -0.5383, -1.6497, -0.47554523]
         }
         
         # Diccionario de posiciones cartesianas fijas guardadas (TCP Pose: X, Y, Z, Rx, Ry, Rz)
@@ -65,6 +65,12 @@ class RobotController:
         print(f"Posición actual TCP: {current_pose}")
         return current_pose
 
+    def get_current_joints(self):
+        """Obtiene y retorna la posición articular actual (joints)."""
+        current_joints = self.con_rcv.getActualQ()
+        print(f"Posición articular actual: {current_joints}")
+        return current_joints
+
     def actuate_digital_output(self, pin, value):
         """Activa o desactiva una salida digital."""
         print(f"{'Activando' if value else 'Desactivando'} salida digital {pin}.")
@@ -83,6 +89,26 @@ class RobotController:
             return self.move_linear(self.fixed_cartesian_positions[name], speed, acceleration)
         else:
             raise ValueError(f"Posición cartesiana '{name}' no existe en el registro.")
+
+    def move_relative_cartesian(self, displacement, speed=0.3, acceleration=0.2):
+        """
+        Realiza un movimiento lineal relativo a la posición TCP actual.
+        :param displacement: Lista de 6 valores [dx, dy, dz, dRx, dRy, dRz]
+        """
+        print(f"Moviendo relativamente (Cartesiano): {displacement}")
+        current_pose = self.get_current_pose()
+        target_pose = [current_pose[i] + displacement[i] for i in range(6)]
+        return self.move_linear(target_pose, speed, acceleration)
+
+    def move_relative_joint(self, displacement, speed=1.0, acceleration=1.4):
+        """
+        Realiza un movimiento articular relativo a la posición actual.
+        :param displacement: Lista de 6 valores [dq1, dq2, dq3, dq4, dq5, dq6]
+        """
+        print(f"Moviendo relativamente (Articular): {displacement}")
+        current_q = self.get_current_joints()
+        target_q = [current_q[i] + displacement[i] for i in range(6)]
+        return self.move_joint(target_q, speed, acceleration)
 
     def move_until_contact(self, speed_down):
         """Realiza un movimiento en la dirección especificada hasta detectar contacto."""
