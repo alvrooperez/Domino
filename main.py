@@ -38,7 +38,7 @@ def main():
         # 4. Modificar la posición actual y usar MoveL
         print("\n--- Elevando 10 cm desde la posición actual ---")
         tcp_pose = robot.get_current_pose()
-        tcp_pose[2] += 0.30  # Cambiando la altura en Z
+        tcp_pose[2] += 0.10  # Cambiando la altura en Z
         robot.move_linear(tcp_pose, speed=0.1, acceleration=0.5)
         
         print("\n--- Moviéndose Soltando pieza---")
@@ -55,7 +55,7 @@ def main():
         # 4. Modificar la posición actual y usar MoveL
         print("\n--- Elevando 10 cm desde la posición actual ---")
         tcp_pose = robot.get_current_pose()
-        tcp_pose[2] -= 0.30  # Cambiando la altura en Z
+        tcp_pose[2] -= 0.10  # Cambiando la altura en Z
         robot.move_linear(tcp_pose, speed=0.1, acceleration=0.5)
 
         #6. Actuar salida digital finalizando tarea
