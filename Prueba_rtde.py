@@ -59,6 +59,7 @@ if __name__ == "__main__":
             raise Exception("No se pudo mover a la posición cómoda. Abortando.")
 
         # 2️⃣ Bajar hasta detectar contacto
+        '''
         print("Descendiendo hasta contacto...")
         speed_down = [0, 0, -0.05, 0, 0, 0]  # Velocidad en Z negativa (bajar)
         contact_detected = con_ctr.moveUntilContact(speed_down)
@@ -67,10 +68,11 @@ if __name__ == "__main__":
             con_io.setStandardDigitalOut(DIGITAL_OUTPUT_PIN, True)  # Activar salida digital
             print("Contacto detectado, salida digital activada.")
             time.sleep(1.0)  # Esperar 1s antes de subir
-
+        '''
+        
         # 3️⃣ Subir en línea recta
         tcp_pose = con_rcv.getActualTCPPose()
-        tcp_pose[2] += 0.10  # Subir 10 cm
+        tcp_pose[2] += -0.10  # Subir 10 cm
         current_pose = move_linear(con_ctr, con_rcv, tcp_pose, 0.1, 0.5)
         if current_pose is None:
             raise Exception("No se pudo mover a la posición deseada después de contacto. Abortando.")
