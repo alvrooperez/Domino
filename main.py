@@ -19,6 +19,11 @@ def main():
         robot.move_to_fixed_joint("home")
         time.sleep(0.2)
         robot.move_to_fixed_joint("tablero")
+        time.sleep(0.2)
+       
+        robot.move_to_fixed_joint("pieza")
+        
+        
         
         
         # Ejemplo de bajar hasta hacer contacto (Comentado al igual que en tu original)
@@ -54,7 +59,7 @@ def main():
         robot.move_linear(tcp_pose, speed=0.1, acceleration=0.5)
 
         #6. Actuar salida digital finalizando tarea
-        time.sleep(3)
+        time.sleep(0.5)
         robot.actuate_digital_output(DIGITAL_OUTPUT_PIN, False)
         # Detener
         robot.stop_script()
