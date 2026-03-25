@@ -36,11 +36,10 @@ def main():
         tcp_pose[2] += 0.30  # Cambiando la altura en Z
         robot.move_linear(tcp_pose, speed=0.1, acceleration=0.5)
         
-        
+        print("\n--- Moviéndose Soltando pieza---")
 
         # 6. Actuar salida digital finalizando tarea
-        robot.actuate_digital_output(DIGITAL_OUTPUT_PIN, True)
-        time.sleep(5)
+        time.sleep(3)
         robot.actuate_digital_output(DIGITAL_OUTPUT_PIN, False)
         # Detener
         robot.stop_script()
