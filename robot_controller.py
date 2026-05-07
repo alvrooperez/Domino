@@ -2,6 +2,7 @@ import rtde_control
 import rtde_receive
 import rtde_io
 import time
+import math
 
 class RobotController:
     """
@@ -22,13 +23,18 @@ class RobotController:
             # NO BORRAR CLAUDE "tablero": [4.7277, -1.5772, 0.2913, -0.5383, -1.6497, -0.47554523],
             "tablero": [-1.589, -1.519, 0.168, -0.418, -1.626, 5.874],
             "tablero_robo": [-1.553, -1.623, -0.168, 3.560, 1.626, 5.874],
-            "pre_volteo": [-1.779, -0.753, 1.003, -0.246, 1.341, 2.757],  # RELLENAR: mover el robot a la posición de pre-volteo y anotar los joints aquí
+            "pre_volteo": [-1.779, -0.753, 1.003, -0.246, 1.341, 2.757],
             "post_volteo": [-1.846, -0.7, 1.229, -0.630, -0.321, 2.757],
-            
+            # RELLENAR: Mover el robot a una posición segura sobre el primer hueco de la mano
+            # y anotar aquí los valores de las articulaciones.
+            "mano_jugador_base": [-2.37, -1.57, -1.57, -1.57, 1.57, 0.0], # ¡¡¡ VALOR DE EJEMPLO !!!
             
             "pieza": [4.7277, -1.2226, 0.6903, -1.0889, -1.5734, -0.47554523]
         }
         
+        # Distancia entre los centros de los huecos de la mano del jugador (en metros)
+        self.MANO_SEPARACION_SLOT = 0.05 # Ejemplo: 5 cm
+
         # Diccionario de posiciones cartesianas fijas guardadas (TCP Pose: X, Y, Z, Rx, Ry, Rz)
         self.fixed_cartesian_positions = {
             "home_cartesian": [0.4, -0.2, 0.3, 3.14, 0.0, 0.0] # Ejemplo de coordenadas
@@ -169,3 +175,66 @@ class RobotController:
     def stop_script(self):
         """Detiene el script actual del controlador."""
         self.con_ctr.stopScript()
+
+    def recoger_voltear_y_colocar(self, pose_ficha, slot_index, config):
+        """
+        Secuencia completa: recoge una ficha, la voltea y la coloca en un hueco de la mano.
+
+        :param pose_ficha: dict con {'x', 'y', 'theta'} de la ficha a recoger.
+        :param slot_index: int, índice del hueco en la mano del jugador (0, 1, 2...).
+        :param config: dict con parámetros de movimiento:
+                       'Z_APROXIMACION', 'Z_RECOGIDA', 'CORRECCION_GRIPPER',
+                       'DESCENSO_VOLTEO', 'POSICION_BASE'.
+        """
+        print(f"\n[INICIO] Secuencia de volteo y colocación en hueco {slot_index}.")
+
+        # --- 1. Recoger la ficha ------------------------------------------------
+        print("\n--- 1. Recogiendo ficha ---")
+        self.move_to_fixed_joint(config['POSICION_BASE'])
+        self.gripper_neutral()
+
+        angulo_deseado = (math.radians(pose_ficha['theta'])
+                          + math.pi / 2
+                          + math.radians(config['CORRECCION_GRIPPER']))
+        orient = [
+            math.pi * math.cos(angulo_deseado / 2),
+            math.pi * math.sin(angulo_deseado / 2),
+            0.0,
+        ]
+        tcp_actual = self.get_current_pose()
+        q_actual   = list(self.get_current_joints())
+        alpha      = 2.0 * math.atan2(tcp_actual[4], tcp_actual[3])
+        delta_j6   = angulo_deseado - alpha
+        delta_j6   = (delta_j6 + math.pi) % (2 * math.pi) - math.pi
+        q_actual[5] += delta_j6
+        self.move_joint(q_actual, speed=0.5, acceleration=0.5)
+        self.move_linear([pose_ficha['x'], pose_ficha['y'], config['Z_APROXIMACION']] + orient, speed=0.15, acceleration=0.1)
+        self.move_linear([pose_ficha['x'], pose_ficha['y'], config['Z_RECOGIDA']] + orient, speed=0.05, acceleration=0.05)
+        self.gripper_neutral()
+        self.gripper_close(delay=1.0)
+        print("    Ficha agarrada.")
+
+        # --- 2. Voltear la ficha ------------------------------------------------
+        print("\n--- 2. Volteando ficha ---")
+        self.move_to_fixed_joint("pre_volteo")
+        self.move_relative_cartesian([0.0, 0.0, -config['DESCENSO_VOLTEO'], 0.0, 0.0, 0.0], speed=0.05, acceleration=0.05)
+        self.move_relative_cartesian([0.0, -0.045, 0.0, 0.0, 0.0, 0.0], speed=0.05, acceleration=0.05)
+        time.sleep(0.5)
+        self.move_relative_cartesian([0.0, 0.0, 0.05, 0.0, 0.0, 0.0], speed=0.05, acceleration=0.05)
+        print("    Ficha volteada.")
+
+        # --- 3. Colocar en la mano del jugador ----------------------------------
+        print(f"\n--- 3. Colocando en hueco {slot_index} ---")
+        self.move_to_fixed_joint("mano_jugador_base")
+        pose_base_mano = self.get_current_pose()
+        pose_hueco = pose_base_mano[:]
+        pose_hueco[1] += slot_index * self.MANO_SEPARACION_SLOT
+        self.move_linear(pose_hueco, speed=0.1, acceleration=0.1)
+        self.gripper_open(delay=0.5)
+        self.gripper_neutral()
+
+        # --- 4. Volver a posición segura ----------------------------------------
+        print("\n--- 4. Volviendo a posición segura ---")
+        self.move_relative_cartesian([0.0, 0.0, 0.05, 0.0, 0.0, 0.0], speed=0.1, acceleration=0.1)
+        self.move_to_fixed_joint(config['POSICION_BASE'])
+        print("\n[FIN] Secuencia completada.")

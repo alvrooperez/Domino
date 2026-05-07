@@ -22,9 +22,13 @@ import cv2
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, "/home/pedro/Laboratorio")
-sys.path.insert(0, "/home/pedro/Laboratorio/Domino")
-sys.path.insert(0, "/home/pedro/Laboratorio/Domino/CameraCalibration")
+# Añadir rutas del proyecto de forma relativa para importar los módulos.
+# La estructura esperada es .../Laboratorio/Domino/prueba_dos/
+DOMINO_DIR = os.path.abspath(os.path.join(HERE, '..'))
+LABORATORIO_DIR = os.path.abspath(os.path.join(DOMINO_DIR, '..'))
+sys.path.insert(0, LABORATORIO_DIR)
+sys.path.insert(0, DOMINO_DIR)
+sys.path.insert(0, os.path.join(DOMINO_DIR, "CameraCalibration"))
 sys.path.insert(0, HERE)
 
 from Deteccion_fichas import DominoDetector

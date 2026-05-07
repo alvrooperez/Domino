@@ -22,9 +22,13 @@ import cv2
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, "/home/pedro/Laboratorio")
-sys.path.insert(0, "/home/pedro/Laboratorio/Domino")
-sys.path.insert(0, "/home/pedro/Laboratorio/Domino/CameraCalibration")
+# Añadir rutas del proyecto de forma relativa para importar los módulos.
+# La estructura esperada es .../Laboratorio/Domino/prueba_dos/
+DOMINO_DIR = os.path.abspath(os.path.join(HERE, '..'))
+LABORATORIO_DIR = os.path.abspath(os.path.join(DOMINO_DIR, '..'))
+sys.path.insert(0, LABORATORIO_DIR)
+sys.path.insert(0, DOMINO_DIR)
+sys.path.insert(0, os.path.join(DOMINO_DIR, "CameraCalibration"))
 sys.path.insert(0, HERE)
 
 from Deteccion_fichas import DominoDetector
@@ -119,6 +123,7 @@ def main():
     if cara:
         print(f"\n  (También detectadas cara-arriba: {list(cara.keys())})")
 
+    # ── Elegir ficha y hueco ───────────────────────────────────────────────────
     print("\n  Número de ficha a voltear (o 'q' para salir): ", end="")
     sel = input().strip()
     if sel.lower() == 'q':
@@ -129,6 +134,14 @@ def main():
         pose_ficha = reverso[clave]
     except (ValueError, IndexError):
         print("[!] Selección no válida.")
+        return
+
+    print("  Número de hueco en la mano para dejarla (0, 1, 2...): ", end="")
+    sel_hueco = input().strip()
+    try:
+        slot_index = int(sel_hueco)
+    except ValueError:
+        print("[!] Número de hueco no válido.")
         return
 
     tcp_x = pose_ficha['x']
