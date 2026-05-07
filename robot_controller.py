@@ -19,7 +19,13 @@ class RobotController:
             "home": [1.45677137, -1.61379637, 0.03687411, -1.53243818, 0.12954740, -0.47554523],
             "q2": [1.38072347, -1.69596066, 0.17434245, -1.63875736, -1.50716430, -0.43589860],
             "comoda": [1.38097023, -1.64333977, 1.61802417, -1.54438673, -1.52174121, -0.43589860],
-            "tablero": [4.7277, -1.5772, 0.2913, -0.5383, -1.6497, -0.47554523],
+            # NO BORRAR CLAUDE "tablero": [4.7277, -1.5772, 0.2913, -0.5383, -1.6497, -0.47554523],
+            "tablero": [-1.589, -1.519, 0.168, -0.418, -1.626, 5.874],
+            "tablero_robo": [-1.553, -1.623, -0.168, 3.560, 1.626, 5.874],
+            "pre_volteo": [-1.779, -0.753, 1.003, -0.246, 1.341, 2.757],  # RELLENAR: mover el robot a la posición de pre-volteo y anotar los joints aquí
+            "post_volteo": [-1.846, -0.7, 1.229, -0.630, -0.321, 2.757],
+            
+            
             "pieza": [4.7277, -1.2226, 0.6903, -1.0889, -1.5734, -0.47554523]
         }
         
@@ -33,7 +39,11 @@ class RobotController:
         print(f"Estableciendo conexión con el robot en IP: {self.ip}...")
         self.con_ctr = rtde_control.RTDEControlInterface(self.ip)
         self.con_rcv = rtde_receive.RTDEReceiveInterface(self.ip)
-        self.con_io = rtde_io.RTDEIOInterface(self.ip)
+        try:
+            self.con_io = rtde_io.RTDEIOInterface(self.ip)
+        except RuntimeError as e:
+            print(f"[AVISO] RTDEIOInterface no disponible (I/O deshabilitado): {e}")
+            self.con_io = None
         print("Conexión establecida correctamente.")
 
     def disconnect(self):
@@ -44,6 +54,7 @@ class RobotController:
             self.con_rcv.disconnect()
         if self.con_io and self.con_io.isConnected():
             self.con_io.disconnect()
+        self.con_io = None
         print("Conexiones cerradas.")
 
     def move_linear(self, pose, speed=0.3, acceleration=0.2):
@@ -74,15 +85,55 @@ class RobotController:
 
     def actuate_digital_output(self, pin, value):
         """Activa o desactiva una salida digital."""
+        if self.con_io is None:
+            raise RuntimeError("RTDEIOInterface no disponible; no se puede actuar la salida digital.")
         print(f"{'Activando' if value else 'Desactivando'} salida digital {pin}.")
         self.con_io.setStandardDigitalOut(pin, value)
 
+    # ── PINZA (Tool Digital Outputs) ─────────────────────────────────────────
+
+    def gripper_close(self, delay=0.5):
+        """Cierra la pinza: 00 → 01. Neutral=00 es abierto por defecto."""
+        if self.con_io is None:
+            raise RuntimeError("RTDEIOInterface no disponible; no se puede controlar la pinza.")
+        print("Cerrando pinza...")
+        self.con_io.setToolDigitalOut(0, False)
+        self.con_io.setToolDigitalOut(1, False)
+        time.sleep(0.1)
+        self.con_io.setToolDigitalOut(1, True)
+        time.sleep(delay)
+        print("Pinza cerrada.")
+
+    def gripper_open(self, delay=0.5):
+        """Abre la pinza: 01 → 00 → 10."""
+        if self.con_io is None:
+            raise RuntimeError("RTDEIOInterface no disponible; no se puede controlar la pinza.")
+        print("Abriendo pinza...")
+        self.con_io.setToolDigitalOut(0, False)
+        self.con_io.setToolDigitalOut(1, False)
+        time.sleep(0.1)
+        self.con_io.setToolDigitalOut(0, True)
+        time.sleep(delay)
+        print("Pinza abierta.")
+
+    def gripper_neutral(self):
+        """Estado neutro 00 (pinza abierta por defecto)."""
+        if self.con_io is None:
+            raise RuntimeError("RTDEIOInterface no disponible; no se puede controlar la pinza.")
+        self.con_io.setToolDigitalOut(0, False)
+        self.con_io.setToolDigitalOut(1, False)
+
+    # ─────────────────────────────────────────────────────────────────────────
+
     def move_to_fixed_joint(self, name, speed=1.0, acceleration=1.4):
         """Se mueve a una posición articular predefinida por su nombre."""
-        if name in self.fixed_joint_positions:
-            return self.move_joint(self.fixed_joint_positions[name], speed, acceleration)
-        else:
+        if name not in self.fixed_joint_positions:
             raise ValueError(f"Posición articular '{name}' no existe en el registro.")
+        pos = self.fixed_joint_positions[name]
+        if pos is None:
+            raise ValueError(f"Posición articular '{name}' no tiene joints definidos. "
+                             f"Rellénala en robot_controller.py antes de usarla.")
+        return self.move_joint(pos, speed, acceleration)
             
     def move_to_fixed_cartesian(self, name, speed=0.3, acceleration=0.2):
         """Se mueve a una posición cartesiana predefinida por su nombre."""
