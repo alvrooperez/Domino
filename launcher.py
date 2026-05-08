@@ -10,15 +10,15 @@ def main():
     python_bin = sys.executable
 
     try:
-        # 1. Lanzamos el servidor de Visión
-        print("[LANZADOR] Arrancando Visión...")
-        vision_process = subprocess.Popen([python_bin, "fake_vision.py"])
-        time.sleep(1) # Le damos un segundo para que abra el puerto
+        # 1. Lanzamos el servidor de Visión Real
+        print("[LANZADOR] Arrancando Visión Real...")
+        vision_process = subprocess.Popen([python_bin, "real_vision.py"])
+        time.sleep(2) # Le damos un segundo para que abra el puerto
 
-        # 2. Lanzamos el servidor de Control (UR3e)
-        print("[LANZADOR] Arrancando Control...")
-        control_process = subprocess.Popen([python_bin, "fake_control.py"])
-        time.sleep(1)
+        # 2. Lanzamos el servidor de Control Real (UR3e)
+        print("[LANZADOR] Arrancando Control Real...")
+        control_process = subprocess.Popen([python_bin, "real_control.py"])
+        time.sleep(2)
 
         # 3. Lanzamos el Motor (Tu juego)
         print("[LANZADOR] Arrancando Motor Principal...")
@@ -34,9 +34,12 @@ def main():
     
     finally:
         print("\n🛑 Cerrando todos los módulos...")
-        # Matamos los servidores de fondo para que los puertos 5555 y 5556 queden libres
-        vision_process.terminate()
-        control_process.terminate()
+        try:
+            vision_process.terminate()
+            control_process.terminate()
+            engine_process.terminate()
+        except:
+            pass
         print("✅ Sistema apagado correctamente.")
 
 if __name__ == "__main__":
