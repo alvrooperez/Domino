@@ -1,17 +1,9 @@
 """
-Test de volteo: detecta fichas en reverso, las recoge y las voltea.
-
-Flujo:
-  1. Captura imagen y calibra con ArUcos.
-  2. Detecta todas las fichas; muestra las que están en reverso.
-  3. El usuario elige cuál voltear.
-  4. Robot recoge la ficha → va a 'tablero' (pinza cerrada) →
-     va a 'pre_volteo' (pinza cerrada) → baja 0.116 m (pinza cerrada).
-
-Antes de ejecutar: define 'pre_volteo' en robot_controller.py.
+Test de Ciclo Completo: Detecta fichas bocarabajo (reverso), las recoge,
+las voltea dejándolas en la mano, y luego las mueve de la mano al tablero.
 
 Uso:
-    python test_volteo.py
+    python test_ciclo_completo.py
 """
 
 import sys
@@ -23,7 +15,6 @@ import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Añadir rutas del proyecto de forma relativa para importar los módulos.
-# La estructura esperada es .../Laboratorio/Domino/prueba_dos/
 DOMINO_DIR = os.path.abspath(os.path.join(HERE, '..'))
 LABORATORIO_DIR = os.path.abspath(os.path.join(DOMINO_DIR, '..'))
 sys.path.insert(0, LABORATORIO_DIR)
@@ -43,7 +34,7 @@ Z_APROXIMACION     = 0.12
 Z_RECOGIDA         = 0.039
 CORRECCION_GRIPPER = 20.0
 POSICION_BASE      = "tablero"
-DESCENSO_VOLTEO    = 0.116   # metros que baja desde pre_volteo
+DESCENSO_VOLTEO    = 0.116
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -69,13 +60,10 @@ def main():
     # ── Cargar config ArUco ────────────────────────────────────────────────────
     if not os.path.exists(ARUCO_CONFIG_PATH):
         print(f"[ERROR] No se encuentra {ARUCO_CONFIG_PATH}")
-        print("        Ejecuta primero setup_arucos.py.")
         return
 
     with open(ARUCO_CONFIG_PATH) as f:
         aruco_config = json.load(f)
-
-
 
     # ── Conectar robot ─────────────────────────────────────────────────────────
     robot = RobotController(ROBOT_IP)
@@ -86,12 +74,13 @@ def main():
         print("[ERROR] RTDEIOInterface no disponible.")
         return
     
-    robot.move_to_fixed_joint("tablero")
+    robot.move_to_fixed_joint(POSICION_BASE)
 
     # ── Capturar ───────────────────────────────────────────────────────────────
     print("[1] Capturando imagen...")
     frame = capturar_frame()
     if frame is None:
+        robot.disconnect()
         return
 
     # ── Calibrar ───────────────────────────────────────────────────────────────
@@ -104,6 +93,7 @@ def main():
 
     if calib_model is None:
         print(f"[ERROR] Solo {n_arucos} marcador(es) visible(s) (mínimo 3).")
+        robot.disconnect()
         return
 
     # ── Detectar fichas ────────────────────────────────────────────────────────
@@ -117,41 +107,28 @@ def main():
 
     if not poses:
         print("[!] No se detectó ninguna ficha. Saliendo.")
+        robot.disconnect()
         return
 
-    # ── Mostrar todas las fichas ───────────────────────────────────────────────
-    print(f"\n[4] Fichas detectadas ({len(poses)}):")
-    claves = list(poses.keys())
-    for i, clave in enumerate(claves):
-        p = poses[clave]
-        tipo = "REVERSO" if clave.startswith("reverso") else "BOCARRIBA"
-        print(f"  [{i}] {clave} ({tipo})  →  X={p['x']:.4f}  Y={p['y']:.4f}  θ={p['theta']:.1f}°")
-
-    # ── Elegir ficha ───────────────────────────────────────────────────────────
-    print("\n  Número de ficha a manipular (o 'q' para salir): ", end="")
-    sel = input().strip()
-    if sel.lower() == 'q':
-        return
-    try:
-        idx        = int(sel)
-        clave      = claves[idx]
-        pose_ficha = poses[clave]
-    except (ValueError, IndexError):
-        print("[!] Selección no válida.")
+    # ── Filtrar solo las fichas bocarabajo (reverso) ───────────────────────────
+    reverso = {k: v for k, v in poses.items() if k.startswith("reverso")}
+    if not reverso:
+        print("[!] No hay fichas bocarabajo para realizar el ciclo. Saliendo.")
+        robot.disconnect()
         return
 
-    es_reverso = clave.startswith("reverso")
+    print(f"\n[4] Se van a procesar {len(reverso)} fichas bocarabajo:")
+    claves_reverso = list(reverso.keys())
+    for i, clave in enumerate(claves_reverso):
+        p = reverso[clave]
+        print(f"  [{i}] {clave}  →  X={p['x']:.4f}  Y={p['y']:.4f}  θ={p['theta']:.1f}°")
 
-    tcp_x = pose_ficha['x']
-    tcp_y = pose_ficha['y']
-    if POSICION_BASE == "tablero_robo":
-        tcp_x = -tcp_x
-        tcp_y = -tcp_y
-
-    print(f"\n[5] Objetivo: {clave}  X={tcp_x:.4f}  Y={tcp_y:.4f}  θ={pose_ficha['theta']:.1f}°")
+    print("\n  ¿Iniciar secuencia completa? (s/n): ", end="")
+    if input().strip().lower() != 's':
+        robot.disconnect()
+        return
 
     try:
-        
         config = {
             'Z_APROXIMACION': Z_APROXIMACION,
             'Z_RECOGIDA': Z_RECOGIDA,
@@ -160,46 +137,31 @@ def main():
             'POSICION_BASE': POSICION_BASE
         }
 
-        if es_reverso:
-            print("  Ficha en reverso. ¿Número de hueco en la mano para dejarla? (0, 1, 2...): ", end="")
-            sel_hueco = input().strip()
-            try:
-                slot_index = int(sel_hueco)
-            except ValueError:
-                print("[!] Número de hueco no válido.")
-                return
+        # ── FASE 1: Recoger, Voltear y Colocar en Mano ─────────────────────────
+        print(f"\n{'='*50}\n[FASE 1] RECOGER, VOLTEAR Y PONER EN MANO\n{'='*50}")
+        for slot_index, clave in enumerate(claves_reverso):
+            pose_ficha = reverso[clave].copy() # Copia para no modificar el original
+            if POSICION_BASE == "tablero_robo":
+                pose_ficha['x'] = -pose_ficha['x']
+                pose_ficha['y'] = -pose_ficha['y']
+                
+            print(f"\n---> Ficha {clave} (Hueco Mano: {slot_index}) <---")
             robot.recoger_voltear_y_colocar(pose_ficha, slot_index, config)
-        else:
-            print("  [MODO MANUAL] Mover ficha de la MANO al TABLERO.")
-            print("  ¿De qué hueco de la MANO recogemos la ficha? (0, 1, 2...): ", end="")
-            sel_mano = input().strip()
-            try:
-                slot_mano = int(sel_mano)
-            except ValueError:
-                print("[!] Posición no válida.")
-                return
 
-            print("  ¿En qué posición de la fila del TABLERO la dejamos? (0, 1, 2...): ", end="")
-            sel_tablero = input().strip()
-            try:
-                slot_tablero = int(sel_tablero)
-            except ValueError:
-                print("[!] Posición no válida.")
-                return
+        # ── FASE 2: Mover de la Mano al Tablero ────────────────────────────────
+        print(f"\n{'='*50}\n[FASE 2] MOVER DE LA MANO AL TABLERO\n{'='*50}")
+        for slot_index in range(len(claves_reverso)):
+            print(f"\n---> Hueco Mano: {slot_index} -> Tablero Pos: {slot_index} <---")
+            robot.mover_mano_a_tablero(slot_index, slot_index, config)
 
-            robot.mover_mano_a_tablero(slot_mano, slot_tablero, config)
-
-        print(f"\n[8] Volviendo a '{POSICION_BASE}'...")
+        print(f"\n[5] Volviendo a posición segura '{POSICION_BASE}'...")
         robot.move_to_fixed_joint(POSICION_BASE)
-
-        print("\n[OK] Secuencia completada con éxito.")
+        print("\n[OK] ¡Ciclo completo finalizado con éxito!")
 
     except Exception as e:
         print(f"\n[ERROR] {e}")
-
     finally:
         robot.disconnect()
-
 
 if __name__ == "__main__":
     main()

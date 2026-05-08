@@ -75,15 +75,8 @@ def recoger_ficha(robot, tcp_x, tcp_y, theta):
         0.0,
     ]
 
-    # Pre-posicionar joint 6
-    tcp_actual = robot.get_current_pose()
-    q_actual   = list(robot.get_current_joints())
-    alpha      = 2.0 * math.atan2(tcp_actual[4], tcp_actual[3])
-    delta_j6   = angulo_deseado - alpha
-    delta_j6   = (delta_j6 + math.pi) % (2 * math.pi) - math.pi
-    q_actual[5] += delta_j6
-    robot.move_joint(q_actual, speed=0.5, acceleration=0.5)
-
+    # Pre-posicionar joint 6 (camino más corto)
+    robot.pre_rotate_gripper(angulo_deseado, speed=0.5, acceleration=0.5)
     # Aproximación
     robot.move_linear([tcp_x, tcp_y, Z_APROXIMACION] + orient, speed=0.15, acceleration=0.1)
 

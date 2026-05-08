@@ -168,16 +168,8 @@ def main():
         ]
 
         # [8] Pre-posicionar joint 6 (camino más corto, evita vuelta completa)
-        tcp_tablero  = robot.get_current_pose()
-        q_tablero    = list(robot.get_current_joints())
-        alpha_actual = 2.0 * math.atan2(tcp_tablero[4], tcp_tablero[3])
-        delta_j6     = angulo_deseado - alpha_actual
-        delta_j6     = (delta_j6 + math.pi) % (2 * math.pi) - math.pi
-
-        q_tablero[5] += delta_j6
-        print(f"\n[7] Pre-posicionando gripper  Δ={math.degrees(delta_j6):.1f}°...")
-        robot.move_joint(q_tablero, speed=0.5, acceleration=0.5)
-
+        print(f"\n[7] Pre-posicionando gripper...")
+        robot.pre_rotate_gripper(angulo_deseado, speed=0.5, acceleration=0.5)
         # [9] Aproximación
         pose_aprox = [tcp_x, tcp_y, Z_APROXIMACION] + orient
         print(f"\n[8] Aproximación a Z={Z_APROXIMACION} m sobre la ficha...")
