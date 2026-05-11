@@ -45,30 +45,35 @@ def run_control():
         print(f"[REAL_CONTROL] Recibida acción: {action}")
 
         try:
-            if action == "MOVE":
-                # El motor nos manda la ficha y las poses, pero para usar mover_mano_a_tablero
-                # necesitamos saber en qué SLOT de la mano está físicamente.
-                # Como el motor gestiona el orden de la mano, podemos usar un mapeo o pedirlo.
-                # Por ahora, intentamos deducir el slot basado en la pose o el orden.
+            if action == "MOVE_TO_POSITION":
+                pos = cmd.get("position", "tablero")
+                robot.move_to_fixed_joint(pos)
                 
-                # TODO: El motor debería enviar el slot_index. 
-                # Si no lo envía, lo estimamos o buscamos la ficha más cercana.
+            elif action == "MOVE":
+                # Asegurar que la posición base es tablero para jugar
+                CONFIG_MOVIMIENTO['POSICION_BASE'] = "tablero"
+                
                 slot_mano = cmd.get("slot_mano", 0) 
                 slot_tablero = cmd.get("slot_tablero", 0)
                 
-                print(f" -> Ejecutando: mover_mano_a_tablero(slot_mano={slot_mano}, slot_tablero={slot_tablero})")
+                # Obtener la pose de destino enviada por el motor
+                place_pose = cmd.get("place_pose")
+                
+                if place_pose:
+                    print(f"[REAL_CONTROL] Movimiento a tablero: X={place_pose['x']:.3f}, Y={place_pose['y']:.3f}, Theta={place_pose['theta']:.1f}")
+                    # Aquí el robot debería usar place_pose para el destino final
+                    # por ahora el método mover_mano_a_tablero usa un desplazamiento fijo,
+                    # deberíamos actualizarlo para usar la pose real si queremos precisión.
+                
                 robot.mover_mano_a_tablero(slot_mano, slot_tablero, CONFIG_MOVIMIENTO)
 
             elif action == "STEAL":
-                # El motor ha decidido robar. 
-                # Necesitamos: 1. Ir a la zona de pozo (pendiente definir posición fija)
-                # 2. Detectar cual es la ficha a robar (grab_pose)
-                # 3. Llamar a recoger_voltear_y_colocar
+                # Asegurar que la posición base es tablero_robo para robar
+                CONFIG_MOVIMIENTO['POSICION_BASE'] = "tablero_robo"
                 
                 grab = cmd["grab_pose"]
                 slot_destino = cmd.get("slot_mano", 0)
                 
-                print(f" -> Ejecutando: recoger_voltear_y_colocar en slot {slot_destino}")
                 robot.recoger_voltear_y_colocar(grab, slot_destino, CONFIG_MOVIMIENTO)
 
             socket_motor.send_string(json.dumps({"status": "done"}))

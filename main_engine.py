@@ -22,6 +22,7 @@ class DominoControlPanel:
         self.turn = "ROBOT" # Puede ser "ROBOT" o "HUMANO"
         self.human_hand_count = 0
         self.is_running = False
+        self.boneyard_empty = False
 
         # --- Interfaz Tkinter ---
         self.root = tk.Tk()
@@ -128,21 +129,43 @@ class DominoControlPanel:
         
         self.root.update_idletasks()
 
-    def update_from_vision(self):
+    def scan_zone(self, zone):
+        """Mueve el robot a la zona y actualiza el estado desde la visión."""
         try:
-            self.vision_sock.send_string("GET_STATE")
+            # 1. Mover el robot a la posición de observación
+            pos = "tablero" if zone == "BOARD" else "tablero_robo"
+            print(f"[MOTOR] Moviendo robot a {pos} para escanear {zone}...")
+            self.control_sock.send_string(json.dumps({"action": "MOVE_TO_POSITION", "position": pos}))
+            self.control_sock.recv_string()
+
+            # 2. Pedir estado a la visión
+            print(f"[MOTOR] Pidiendo estado de zona {zone}...")
+            self.vision_sock.send_string(f"GET_STATE:{zone}")
             data = json.loads(self.vision_sock.recv_string())
-            self.board = deque(data["board"])
-            self.hand = data["robot_hand"]
-            self.robot_hand_poses = data.get("robot_hand_poses", {})
-            self.board_poses = data.get("board_poses", {})
-            self.boneyard_poses = data.get("boneyard_poses", {})
-            self.human_hand_count = data.get("human_hand_count", 0)
+            
+            if "error" in data:
+                print(f"[MOTOR] Error de visión en {zone}: {data['error']}")
+                return False
+
+            # 3. Actualizar estado interno
+            if zone == "BOARD":
+                self.board = deque(data.get("board", []))
+                self.hand = data.get("robot_hand", [])
+                self.robot_hand_poses = data.get("robot_hand_poses", {})
+                self.board_poses = data.get("board_poses", {})
+                self.human_hand_count = data.get("human_hand_count", 0)
+            else: # BONEYARD
+                self.boneyard_poses = data.get("boneyard_poses", {})
+                self.boneyard_empty = data.get("boneyard_empty", False)
+            
             self.render()
-            return data["boneyard_empty"]
+            return self.boneyard_empty
         except Exception as e:
-            print(f"[MOTOR] Error en visión: {e}")
+            print(f"[MOTOR] Error escaneando {zone}: {e}")
             return True
+
+    def update_from_vision(self):
+        return self.scan_zone("BOARD")
 
     def check_win(self):
         if len(self.hand) == 0:
@@ -195,6 +218,10 @@ class DominoControlPanel:
         # --- LÓGICA DE INICIO: Robar hasta tener fichas (ej. 2 para test) ---
         if len(self.hand) < 2 and not boneyard_empty:
             print(f"[MOTOR] Robando ficha inicial ({len(self.hand)+1}/2)...")
+            
+            # Escanear el pozo para encontrar fichas
+            self.scan_zone("BONEYARD")
+            
             # Coordenada origen: Cualquier ficha disponible en el pozo
             grab = list(self.boneyard_poses.values())[-1] if self.boneyard_poses else None
             if grab:
@@ -222,6 +249,9 @@ class DominoControlPanel:
             self.control_sock.send_string(json.dumps(move))
             self.control_sock.recv_string() # Esperar a que el UR3e termine
         elif not boneyard_empty:
+            # Escanear el pozo para encontrar fichas
+            self.scan_zone("BONEYARD")
+            
             # Coordenada origen: Cualquier ficha disponible en el pozo
             grab = list(self.boneyard_poses.values())[-1] if self.boneyard_poses else None
             if grab:
@@ -233,6 +263,7 @@ class DominoControlPanel:
                     "slot_mano": next_slot
                 }))
                 self.control_sock.recv_string()
+                self.update_from_vision()
         else:
             print("[UI] Bloqueado. Fin.")
             self.toggle_autoplay() # Parar bucle
@@ -248,55 +279,81 @@ class DominoControlPanel:
         self.btn_human.config(state=tk.NORMAL) # Habilitamos el botón
 
     def calculate_logic(self):
-        if not self.board: return None
+        """
+        Lógica mejorada: decide qué ficha jugar, en qué lado y con qué orientación.
+        Si no hay fichas posibles, retorna None (para robar).
+        """
+        if not self.board: 
+            print("[LÓGICA] Tablero vacío. Robot empieza con su primera ficha.")
+            t = self.hand[0]
+            # Usar slot_index real si está disponible
+            t_key = f"{t[0]}_{t[1]}"
+            if t_key not in self.robot_hand_poses: t_key = f"{t[1]}_{t[0]}"
+            slot_real = self.robot_hand_poses.get(t_key, {}).get("slot_index", 0)
+            
+            # Orientación corregida: Normal = 0.0, Doble = 90.0
+            target_theta = 90.0 if t[0] == t[1] else 0.0
+            
+            return {
+                "action": "MOVE", "tile": t, "side": "L",
+                "place_pose": {"x": 0.0, "y": 0.45, "theta": target_theta},
+                "slot_mano": slot_real, "slot_tablero": 0
+            }
+
         l_v, r_v = self.board[0][0], self.board[-1][1]
-        
-        # Extraemos las coordenadas de las fichas en los extremos del tablero
-        # Nota: La visión real puede tener claves diferentes. 
-        # Buscamos por valores de puntos si es necesario.
-        l_tile_data = self.board[0]
-        r_tile_data = self.board[-1]
-        
-        l_key = f"{l_tile_data[0]}_{l_tile_data[1]}"
-        if l_key not in self.board_poses: l_key = f"{l_tile_data[1]}_{l_tile_data[0]}"
-        
-        r_key = f"{r_tile_data[0]}_{r_tile_data[1]}"
-        if r_key not in self.board_poses: r_key = f"{r_tile_data[1]}_{r_tile_data[0]}"
-        
-        l_pose = self.board_poses.get(l_key, {"x": 0.5, "y": 0.3, "theta": 90.0})
-        r_pose = self.board_poses.get(r_key, {"x": 0.5, "y": 0.3, "theta": 90.0})
-        
+        print(f"[LÓGICA] Tablero: {l_v} <---> {r_v}. Mano: {self.hand}")
+
+        # Buscar en la mano
         for i, t in enumerate(self.hand):
-            if t[0] == l_v or t[1] == l_v: 
-                # Calculamos destino basándonos en el extremo izquierdo (-6 cm en X)
-                place = {"x": l_pose["x"] - 0.06, "y": l_pose["y"], "theta": 90.0}
-                t_key = f"{t[0]}_{t[1]}"
-                if t_key not in self.robot_hand_poses: t_key = f"{t[1]}_{t[0]}"
-                slot_real = self.robot_hand_poses.get(t_key, {}).get("slot_index", i)
+            t_key = f"{t[0]}_{t[1]}"
+            if t_key not in self.robot_hand_poses: t_key = f"{t[1]}_{t[0]}"
+            slot_real = self.robot_hand_poses.get(t_key, {}).get("slot_index", i)
 
+            # --- OPCIÓN 1: LADO IZQUIERDO ---
+            if t[0] == l_v or t[1] == l_v:
+                l_tile_data = self.board[0]
+                l_key = f"{l_tile_data[0]}_{l_tile_data[1]}"
+                if l_key not in self.board_poses: l_key = f"{l_tile_data[1]}_{l_tile_data[0]}"
+                l_pose = self.board_poses.get(l_key, {"x": 0.0, "y": 0.45, "theta": 0.0})
+                
+                # Orientación: Doble = 90. Normal = 0 o 180.
+                if t[0] == t[1]:
+                    target_theta = 90.0
+                else:
+                    # Si t[1] == l_v, la ficha está bien orientada (val1 a la izq, val2 a la derecha conectando con l_v)
+                    # Si t[0] == l_v, hay que girarla 180.
+                    target_theta = 180.0 if t[0] == l_v else 0.0
+                
+                print(f"[LÓGICA] Juego {t} en LADO IZQUIERDO. Conecta {l_v}. Theta={target_theta}")
                 return {
-                    "action": "MOVE", 
-                    "tile": t, 
-                    "side": "L", 
-                    "place_pose": place,
-                    "slot_mano": slot_real,
-                    "slot_tablero": 0
+                    "action": "MOVE", "tile": t, "side": "L",
+                    "place_pose": {"x": l_pose["x"] - 0.06, "y": l_pose["y"], "theta": target_theta},
+                    "slot_mano": slot_real, "slot_tablero": 0
                 }
-            if t[0] == r_v or t[1] == r_v: 
-                # Calculamos destino basándonos en el extremo derecho (+6 cm en X)
-                place = {"x": r_pose["x"] + 0.06, "y": r_pose["y"], "theta": 90.0}
-                t_key = f"{t[0]}_{t[1]}"
-                if t_key not in self.robot_hand_poses: t_key = f"{t[1]}_{t[0]}"
-                slot_real = self.robot_hand_poses.get(t_key, {}).get("slot_index", i)
 
+            # --- OPCIÓN 2: LADO DERECHO ---
+            if t[0] == r_v or t[1] == r_v:
+                r_tile_data = self.board[-1]
+                r_key = f"{r_tile_data[0]}_{r_tile_data[1]}"
+                if r_key not in self.board_poses: r_key = f"{r_tile_data[1]}_{r_tile_data[0]}"
+                r_pose = self.board_poses.get(r_key, {"x": 0.0, "y": 0.45, "theta": 0.0})
+                
+                # Orientación: Doble = 90. Normal = 0 o 180.
+                if t[0] == t[1]:
+                    target_theta = 90.0
+                else:
+                    # Si t[0] == r_v, la ficha conecta t[0] con r_v, val2 queda a la derecha.
+                    # Si t[1] == r_v, hay que girarla 180.
+                    target_theta = 180.0 if t[1] == r_v else 0.0
+                
+                print(f"[LÓGICA] Juego {t} en LADO DERECHO. Conecta {r_v}. Theta={target_theta}")
                 return {
-                    "action": "MOVE", 
-                    "tile": t, 
-                    "side": "R", 
-                    "place_pose": place,
-                    "slot_mano": slot_real,
-                    "slot_tablero": len(self.board)
+                    "action": "MOVE", "tile": t, "side": "R",
+                    "place_pose": {"x": r_pose["x"] + 0.06, "y": r_pose["y"], "theta": target_theta},
+                    "slot_mano": slot_real, "slot_tablero": len(self.board)
                 }
+
+        print("[LÓGICA] No hay jugadas posibles en la mano.")
         return None
 
     def emergency_stop(self):

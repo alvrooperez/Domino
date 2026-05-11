@@ -34,12 +34,16 @@ from aruco_calibrator import calibrar_con_arucos
 
 # ── Configuración ──────────────────────────────────────────────────────────────
 ROBOT_IP           = "169.254.12.28"
-CAMERA_INDEX       = 3
-ARUCO_CONFIG_PATH  = os.path.join(HERE, "arucos_config.json")
-Z_APROXIMACION     = 0.12    # altura de aproximación sobre la ficha (m)
-Z_RECOGIDA         = 0.039   # altura de recogida (= z_fija de calibración)
-CORRECCION_GRIPPER = 20.0    # corrección de ángulo en grados (+ horario)
-POSICION_BASE      = "tablero"
+CAMERA_INDEX       = 2
+POSICION_BASE      = "tablero_robo"   # "tablero" o "tablero_robo"
+Z_APROXIMACION     = 0.12        # altura de aproximación sobre la ficha (m)
+Z_RECOGIDA         = 0.039       # altura de recogida (= z_fija de calibración)
+CORRECCION_GRIPPER = 20.0        # corrección de ángulo en grados (+ horario)
+
+ARUCO_CONFIG_PATH = (
+    os.path.join(HERE, "arucos_robo_config.json") if POSICION_BASE == "tablero_robo"
+    else os.path.join(HERE, "arucos_config.json")
+)
 # ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -79,6 +83,20 @@ def main():
         aruco_config = json.load(f)
     print(f"[OK] Config ArUco: {len(aruco_config['markers'])} marcadores definidos "
           f"(IDs {sorted(aruco_config['markers'].keys())})")
+    
+
+    robot = RobotController(ROBOT_IP)
+    robot.connect()
+
+    if robot.con_io is None:
+        robot.disconnect()
+        print("[ERROR] RTDEIOInterface no disponible.")
+        print("        Deshabilita EtherNet/IP o PROFINET en Installation → Fieldbus.")
+        return
+
+    # [6] Posición base
+    print(f"\n[0] Moviendo a '{POSICION_BASE}'...")
+    robot.move_to_fixed_joint(POSICION_BASE)
 
     # ── Capturar imagen ────────────────────────────────────────────────────────
     print("\n[1] Capturando imagen...")
@@ -137,25 +155,16 @@ def main():
     tcp_y = pose_ficha['y']
 
     if POSICION_BASE == "tablero_robo":
-        tcp_x = -tcp_x
-        tcp_y = -tcp_y
+        tcp_x = tcp_x
+        tcp_y = tcp_y
 
     print(f"\n[5] Objetivo: {clave}  X={tcp_x:.4f}  Y={tcp_y:.4f}  θ={pose_ficha['theta']:.1f}°")
 
     # ── Conectar robot ─────────────────────────────────────────────────────────
-    robot = RobotController(ROBOT_IP)
-    robot.connect()
-
-    if robot.con_io is None:
-        robot.disconnect()
-        print("[ERROR] RTDEIOInterface no disponible.")
-        print("        Deshabilita EtherNet/IP o PROFINET en Installation → Fieldbus.")
-        return
+    
 
     try:
-        # [6] Posición base
-        print(f"\n[6] Moviendo a '{POSICION_BASE}'...")
-        robot.move_to_fixed_joint(POSICION_BASE)
+        
 
         # [7] Calcular orientación: gripper perpendicular al tablero, alineado con la ficha
         angulo_deseado = (math.radians(pose_ficha['theta'])

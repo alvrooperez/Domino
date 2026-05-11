@@ -1,18 +1,20 @@
 """
-Configuración de marcadores ArUco — se ejecuta UNA SOLA VEZ para medir los TCP.
+Configuración de marcadores ArUco — se ejecuta UNA SOLA VEZ por área.
+
+Uso:
+    python setup_arucos.py                     # área de juego  (IDs 0-3)
+    python setup_arucos.py --position robo     # área de robo/pozo (IDs 4-7)
 
 Pasos:
-  1. Pega los 4 marcadores (aruco_0..3.png) en las esquinas del área de juego.
-  2. Ejecuta este script con el robot en modo Remote Control.
+  1. Pega los 4 marcadores de la posición elegida en las esquinas del área.
+  2. Mueve el robot a la posición base de esa área (tablero / tablero_robo).
   3. Para cada marcador visible en la imagen:
-       - Mueve el TCP del robot al centro exacto del marcador (a Z de recogida).
-       - Pulsa la tecla con el ID del marcador (0, 1, 2 ó 3).
+       - Mueve el TCP al centro exacto del marcador (a Z de recogida).
+       - Pulsa la tecla con el ID del marcador.
        - Escribe las coordenadas X Y que muestra el teach pendant.
   4. Con al menos 3 marcadores registrados, pulsa T para guardar.
 
-Salida: arucos_config.json  (no tocar a mano)
-
-A partir de aquí test_move_to_tile.py se calibra automáticamente en cada ejecución.
+Salida: arucos_config.json  o  arucos_robo_config.json
 """
 
 import cv2
@@ -21,10 +23,24 @@ import json
 import time
 import os
 
-CAMERA_INDEX = 3
-Z_FIJA       = 0.039          # altura de recogida en metros (igual que en test_move)
-OUTPUT_PATH  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "arucos_config.json")
+CAMERA_INDEX = 2
+Z_FIJA       = 0.039
 DICT_TYPE    = cv2.aruco.DICT_4X4_50
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+# IDS_POR_POSICION = {
+#     "juego": [0, 1, 2, 3],   # ya calibrado — no tocar
+#     "robo":  [4, 5, 6, 7],
+# }
+# OUTPUT_POR_POSICION = {
+#     "juego": os.path.join(HERE, "arucos_config.json"),
+#     "robo":  os.path.join(HERE, "arucos_robo_config.json"),
+# }
+
+POSICION    = "robo"
+VALID_IDS   = [5, 6, 7, 8]
+OUTPUT_PATH = os.path.join(HERE, "arucos_robo_config.json")
 
 
 def _detectar(frame, aruco_dict, params):
@@ -37,6 +53,13 @@ def _detectar(frame, aruco_dict, params):
 
 
 def main():
+    valid_ids   = VALID_IDS
+    output_path = OUTPUT_PATH
+
+    print(f"\n=== Setup ArUco — posición: {POSICION.upper()} ===")
+    print(f"  IDs esperados : {valid_ids}")
+    print(f"  Salida        : {output_path}\n")
+
     aruco_dict = cv2.aruco.getPredefinedDictionary(DICT_TYPE)
     params     = cv2.aruco.DetectorParameters()
 
@@ -57,13 +80,12 @@ def main():
 
     markers_config = {}
 
-    print("\n  Controles:")
-    print("    0 / 1 / 2 / 3  → registrar TCP del marcador visible")
-    print("    T              → guardar y salir (mínimo 3 marcadores)")
-    print("    D              → borrar el último registrado")
-    print("    Q / ESC        → salir sin guardar\n")
-
-    waiting_input = False
+    ids_str = " / ".join(str(i) for i in valid_ids)
+    print(f"  Controles:")
+    print(f"    {ids_str}  → registrar TCP del marcador visible")
+    print( "    T              → guardar y salir (mínimo 3 marcadores)")
+    print( "    D              → borrar el último registrado")
+    print( "    Q / ESC        → salir sin guardar\n")
 
     while True:
         ret, frame = cap.read()
@@ -72,8 +94,6 @@ def main():
 
         frame = cv2.rotate(frame, cv2.ROTATE_180)
         disp  = cv2.resize(frame, (800, 450))
-        scale_u = orig_w / 800.0
-        scale_v = orig_h / 450.0
 
         corners, ids = _detectar(disp, aruco_dict, params)
 
@@ -91,7 +111,7 @@ def main():
 
         n = len(markers_config)
         color_hud = (0, 220, 0) if n >= 3 else (0, 140, 255)
-        cv2.putText(disp, f"Registrados {n}/4: {sorted(markers_config.keys())}  T=guardar  Q=salir",
+        cv2.putText(disp, f"pos:{POSICION}  registrados {n}/4: {sorted(markers_config.keys())}  T=guardar  Q=salir",
                     (10, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color_hud, 1)
 
         cv2.imshow("Setup ArUco", disp)
@@ -119,26 +139,33 @@ def main():
                 "resolution"   : [orig_w, orig_h],
                 "dict_type"    : "DICT_4X4_50",
             }
-            with open(OUTPUT_PATH, "w") as f:
+            with open(output_path, "w") as f:
                 json.dump(config, f, indent=4)
-            print(f"\n[OK] Guardado en {OUTPUT_PATH}")
+            print(f"\n[OK] Guardado en {output_path}")
             break
 
-        elif key in [ord('0'), ord('1'), ord('2'), ord('3')]:
-            marker_id = key - ord('0')
-            visible = ids is not None and marker_id in ids.flatten()
-            if not visible:
-                print(f"  [!] Marcador {marker_id} no visible en la imagen.")
-                continue
-            print(f"\n  [Marcador {marker_id}] Mueve el TCP al centro del marcador a Z={Z_FIJA} m.")
-            print("  Introduce  X Y  en metros (ej: 0.213 -0.187):  ", end="", flush=True)
-            try:
-                raw = input().strip().split()
-                x, y = float(raw[0]), float(raw[1])
-                markers_config[marker_id] = {"tcp_x": x, "tcp_y": y}
-                print(f"  OK: marcador {marker_id} → X={x:.4f}  Y={y:.4f}")
-            except (ValueError, IndexError):
-                print("  [!] Entrada no válida, marcador no guardado.")
+        else:
+            # Teclas numéricas: IDs válidos para esta posición (soporta 0-9)
+            pressed_id = None
+            for mid in valid_ids:
+                if mid < 10 and key == ord(str(mid)):
+                    pressed_id = mid
+                    break
+
+            if pressed_id is not None:
+                visible = ids is not None and pressed_id in ids.flatten()
+                if not visible:
+                    print(f"  [!] Marcador {pressed_id} no visible en la imagen.")
+                    continue
+                print(f"\n  [Marcador {pressed_id}] Mueve el TCP al centro del marcador a Z={Z_FIJA} m.")
+                print("  Introduce  X Y  en metros (ej: 0.213 -0.187):  ", end="", flush=True)
+                try:
+                    raw = input().strip().split()
+                    x, y = float(raw[0]), float(raw[1])
+                    markers_config[pressed_id] = {"tcp_x": x, "tcp_y": y}
+                    print(f"  OK: marcador {pressed_id} → X={x:.4f}  Y={y:.4f}")
+                except (ValueError, IndexError):
+                    print("  [!] Entrada no válida, marcador no guardado.")
 
     cap.release()
     cv2.destroyAllWindows()

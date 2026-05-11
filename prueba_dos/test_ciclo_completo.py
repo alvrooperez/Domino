@@ -29,11 +29,12 @@ from aruco_calibrator import calibrar_con_arucos
 # ── Configuración ──────────────────────────────────────────────────────────────
 ROBOT_IP           = "169.254.12.28"
 CAMERA_INDEX       = 2
-ARUCO_CONFIG_PATH  = os.path.join(HERE, "arucos_config.json")
+#ARUCO_CONFIG_PATH  = os.path.join(HERE, "arucos_config.json")
+ARUCO_CONFIG_PATH  = os.path.join(HERE, "arucos_robo_config.json")
 Z_APROXIMACION     = 0.12
 Z_RECOGIDA         = 0.039
 CORRECCION_GRIPPER = 20.0
-POSICION_BASE      = "tablero"
+POSICION_BASE      = "tablero_robo"
 DESCENSO_VOLTEO    = 0.116
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -141,9 +142,7 @@ def main():
         print(f"\n{'='*50}\n[FASE 1] RECOGER, VOLTEAR Y PONER EN MANO\n{'='*50}")
         for slot_index, clave in enumerate(claves_reverso):
             pose_ficha = reverso[clave].copy() # Copia para no modificar el original
-            if POSICION_BASE == "tablero_robo":
-                pose_ficha['x'] = -pose_ficha['x']
-                pose_ficha['y'] = -pose_ficha['y']
+            
                 
             print(f"\n---> Ficha {clave} (Hueco Mano: {slot_index}) <---")
             robot.recoger_voltear_y_colocar(pose_ficha, slot_index, config)

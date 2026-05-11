@@ -20,21 +20,26 @@ from aruco_calibrator import calibrar_con_arucos
 
 # --- CONFIGURACIÓN DE ZONAS (Ajustar según realidad) ---
 # Estas coordenadas están en metros (espacio Robot)
-# Basado en tu descripción: Centro es tablero, Izquierda es mano robot.
-X_LIMITE_MANO = -0.2  # Ejemplo: lo que esté a la izquierda de X=-0.2 es la mano
-ARUCO_CONFIG_PATH = os.path.join(PRUEBA_DOS_DIR, "arucos_config.json")
+X_LIMITE_MANO = -0.2
 CAMERA_INDEX = 2
+
+ZONES_CONFIG = {
+    "BOARD": os.path.join(PRUEBA_DOS_DIR, "arucos_config.json"),
+    "BONEYARD": os.path.join(PRUEBA_DOS_DIR, "arucos_robo_config.json")
+}
 # -------------------------------------------------------
 
 def run_vision():
-    # Cargar config de ArUcos
-    try:
-        with open(ARUCO_CONFIG_PATH) as f:
-            aruco_config = json.load(f)
-        print(f"[REAL_VISION] Config ArUco cargada.")
-    except Exception as e:
-        print(f"[ERROR] No se pudo cargar config ArUco: {e}")
-        return
+    # Cargar configs de ArUcos
+    configs = {}
+    for zone, path in ZONES_CONFIG.items():
+        try:
+            with open(path) as f:
+                configs[zone] = json.load(f)
+            print(f"[REAL_VISION] Config ArUco para {zone} cargada.")
+        except Exception as e:
+            print(f"[ERROR] No se pudo cargar config ArUco para {zone}: {e}")
+            return
 
     # Inicializar Cámara
     cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_V4L2)
@@ -50,7 +55,18 @@ def run_vision():
     while True:
         message = socket_motor.recv_string()
         
-        if message == "GET_STATE":
+        # Soportar tanto "GET_STATE" (retrocompatibilidad) como "GET_STATE:ZONE"
+        zone = "BOARD"
+        if ":" in message:
+            _, zone = message.split(":")
+        
+        if message.startswith("GET_STATE"):
+            if zone not in configs:
+                socket_motor.send_string(json.dumps({"error": f"Unknown zone: {zone}"}))
+                continue
+
+            aruco_config = configs[zone]
+            
             # 0. Estabilización de la cámara (esperar a que el robot pare y la cámara enfoque)
             time.sleep(1.5)
             # Limpiar buffer de la cámara (leer frames viejos)
@@ -67,33 +83,38 @@ def run_vision():
             calib_model, n_arucos, debug_frame = calibrar_con_arucos(frame, aruco_config)
             
             if calib_model is None:
-                print(f"[REAL_VISION] ERROR: Solo {n_arucos} ArUcos detectados (necesarios 3).")
-                socket_motor.send_string(json.dumps({"error": "Calibration failed - check ArUcos"}))
+                print(f"[REAL_VISION] ERROR: Solo {n_arucos} ArUcos detectados (necesarios 3) en zona {zone}.")
+                # Mostrar el frame de calibración fallida para que el usuario sepa por qué falla
+                cv2.imshow("DOMINO VISION", debug_frame)
+                cv2.waitKey(1)
+                socket_motor.send_string(json.dumps({"error": f"Calibration failed in {zone} - check ArUcos"}))
                 continue
 
             # 2. Detectar fichas usando el modelo recién calculado
             detector = DominoDetector(calib_model=calib_model)
             res_img, all_tiles, all_poses = detector.procesar(frame)
             
-            print(f"[REAL_VISION] Detecion completada. Total detectado: {len(all_poses)}")
-            for k, p in all_poses.items():
-                print(f"  -> {k} en X:{p['x']:.3f}, Y:{p['y']:.3f}, Th:{p['theta']:.1f}")
-
+            print(f"[REAL_VISION] Detección en {zone} completada. Total detectado: {len(all_poses)}")
+            
             # --- MOSTRAR VISIÓN PARA DEBUG ---
-            cv2.imshow("DOMINO VISION - REAL TIME", res_img)
+            cv2.imshow("DOMINO VISION", res_img)
             cv2.waitKey(1) 
             # ---------------------------------
             
-            # 3. Clasificar fichas por Zonas
+            # 3. Clasificar fichas por Zonas (solo relevante en BOARD)
             board_list = []
             hand_list = []
+            boneyard_poses = {}
             
-            for clave, pose in all_poses.items():
-                if pose['x'] < X_LIMITE_MANO:
-                    hand_list.append((clave, pose))
-                else:
-                    if not clave.startswith("reverso"):
-                        board_list.append((clave, pose))
+            if zone == "BOARD":
+                for clave, pose in all_poses.items():
+                    if pose['x'] < X_LIMITE_MANO:
+                        hand_list.append((clave, pose))
+                    else:
+                        if not clave.startswith("reverso"):
+                            board_list.append((clave, pose))
+            else: # BONEYARD
+                boneyard_poses = {k: v for k, v in all_poses.items() if k.startswith("reverso")}
             
             # Ordenar MANO por Y (de arriba a abajo -> Y mayor a Y menor)
             hand_list.sort(key=lambda item: item[1]['y'], reverse=True)
@@ -117,8 +138,6 @@ def run_vision():
                 pose['board_index'] = i
                 board_poses[clave] = pose
             
-            boneyard_poses = {k: v for k, v in all_poses.items() if k.startswith("reverso")}
-            
             state = {
                 "board": board,
                 "robot_hand": robot_hand,
@@ -126,7 +145,7 @@ def run_vision():
                 "board_poses": board_poses,
                 "boneyard_poses": boneyard_poses,
                 "human_hand_count": 7,
-                "boneyard_empty": len(boneyard_poses) == 0
+                "boneyard_empty": len(boneyard_poses) == 0 if zone == "BONEYARD" else False
             }
             socket_motor.send_string(json.dumps(state))
 
