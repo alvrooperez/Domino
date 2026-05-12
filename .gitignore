@@ -14,3 +14,4 @@ Thumbs.db
 # Si más adelante usas variables de entorno para contraseñas/APIs
 .env
 .vscode
+.venv/
