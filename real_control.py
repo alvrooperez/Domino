@@ -17,7 +17,7 @@ CONFIG_MOVIMIENTO = {
     'Z_APROXIMACION': 0.12,
     'Z_RECOGIDA': 0.039,
     'CORRECCION_GRIPPER': 20.0,
-    'DESCENSO_VOLTEO': 0.116,
+    'DESCENSO_VOLTEO': 0.13,
     'POSICION_BASE': "tablero"
 }
 # ---------------------------
@@ -65,7 +65,7 @@ def run_control():
                     # por ahora el método mover_mano_a_tablero usa un desplazamiento fijo,
                     # deberíamos actualizarlo para usar la pose real si queremos precisión.
                 
-                robot.mover_mano_a_tablero(slot_mano, slot_tablero, CONFIG_MOVIMIENTO)
+                robot.mover_mano_a_tablero(slot_mano, place_pose, CONFIG_MOVIMIENTO)
 
             elif action == "STEAL":
                 # Asegurar que la posición base es tablero_robo para robar

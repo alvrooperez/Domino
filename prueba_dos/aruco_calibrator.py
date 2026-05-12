@@ -14,6 +14,7 @@ El modelo lineal se ajusta en cada llamada: no importa si la cámara se movió.
 
 import cv2
 import numpy as np
+import time
 from sklearn.linear_model import LinearRegression
 
 DICT_TYPE   = cv2.aruco.DICT_4X4_50
@@ -41,12 +42,13 @@ def _detectar_arucos(frame):
     return result
 
 
-def calibrar_con_arucos(frame, config):
+def calibrar_con_arucos(frame, config, cap=None):
     """
     Parámetros
     ----------
     frame  : imagen BGR en resolución nativa (ya rotada 180° si procede)
     config : dict cargado de arucos_config.json
+    cap    : cv2.VideoCapture opcional; si se pasa, reintenta hasta 5 veces capturando nuevo frame
 
     Retorna
     -------
@@ -54,25 +56,40 @@ def calibrar_con_arucos(frame, config):
     n_detectados: int
     debug_frame : imagen BGR 800×450 con los marcadores anotados
     """
-    orig_h, orig_w = frame.shape[:2]
-    scale_u = 800.0 / orig_w
-    scale_v = 450.0 / orig_h
+    MAX_INTENTOS = 5
 
-    # Detectar en resolución nativa para máxima precisión
-    detected = _detectar_arucos(frame)
+    for intento in range(1, MAX_INTENTOS + 1):
+        orig_h, orig_w = frame.shape[:2]
+        scale_u = 800.0 / orig_w
+        scale_v = 450.0 / orig_h
 
-    # Emparejar marcadores detectados con TCP conocidos
-    used_ids = []
-    puntos   = []   # [u_nat, v_nat, tcp_x, tcp_y]
+        # Detectar en resolución nativa para máxima precisión
+        detected = _detectar_arucos(frame)
 
-    for id_str, tcp in config["markers"].items():
-        mid = int(id_str)
-        if mid in detected:
-            u_nat, v_nat = detected[mid]
-            puntos.append([u_nat, v_nat, tcp["tcp_x"], tcp["tcp_y"]])
-            used_ids.append(mid)
+        # Emparejar marcadores detectados con TCP conocidos
+        used_ids = []
+        puntos   = []   # [u_nat, v_nat, tcp_x, tcp_y]
 
-    n = len(puntos)
+        for id_str, tcp in config["markers"].items():
+            mid = int(id_str)
+            if mid in detected:
+                u_nat, v_nat = detected[mid]
+                puntos.append([u_nat, v_nat, tcp["tcp_x"], tcp["tcp_y"]])
+                used_ids.append(mid)
+
+        n = len(puntos)
+
+        if n >= MIN_MARKERS:
+            break
+
+        if cap is not None and intento < MAX_INTENTOS:
+            print(f"[ArUco] Solo {n} markers visibles, reintentando (intento {intento}/5)...")
+            time.sleep(1)
+            ret, new_frame = cap.read()
+            if ret:
+                frame = cv2.rotate(new_frame, cv2.ROTATE_180)
+        else:
+            break
 
     # ── Frame de debug ────────────────────────────────────────────────────────
     disp = cv2.resize(frame, (800, 450))

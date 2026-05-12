@@ -21,17 +21,17 @@ class RobotController:
             "q2": [1.38072347, -1.69596066, 0.17434245, -1.63875736, -1.50716430, -0.43589860],
             "comoda": [1.38097023, -1.64333977, 1.61802417, -1.54438673, -1.52174121, -0.43589860],
             # NO BORRAR CLAUDE "tablero": [4.7277, -1.5772, 0.2913, -0.5383, -1.6497, -0.47554523],
-            "tablero": [-1.589, -1.519, 0.168, -0.418, -1.626, -0.409],
-            "tablero_robo": [1.5928, -1.9335, 0.3604, -0.3199, -1.6258, 5.8739],
-            "centro_robo":[1.2493, -1.1963, 1.2690, -1.5500, -1.6455, 5.8915],
+            "tablero": [-1.5891, -1.7881, 0.0989, -0.2342, -1.5904, 5.8943],
+            "tablero_robo": [1.5928, -1.9335, 0.3604, -0.3199, -1.6258, -0.4093],
+            "centro_robo":[1.2493, -1.1963, 1.2690, -1.5500, -1.6455, -0.3917],
             "pre_volteo": [-1.779, -0.753, 1.003, -0.246, 1.341, 2.757],
             "post_volteo": [-1.846, -0.7, 1.229, -0.630, -0.321, 2.757],
-            "intermedio_volteo": [-0.1998, -1.5025, 1.5685, -1.5495, -1.6455, 5.8915],
+            "intermedio_volteo": [-0.1998, -1.5025, 1.5685, -1.5495, -1.6455, -0.3917],
             # RELLENAR: Mover el robot a una posición segura sobre el primer hueco de la mano
             # y anotar aquí los valores de las articulaciones.
             "mano_jugador_base": [-2.37, -1.57, -1.57, -1.57, 1.57, 0.0], # ¡¡¡ VALOR DE EJEMPLO !!!
             "mano_jugador_arriba": [-1.281, -0.849, 0.900, -1.644, -1.471, 4.560], # ¡COPIA AQUÍ LOS JOINTS CON LA MUÑECA ARRIBA!
-            "centro": [-1.846, -1.338, 1.407, -1.641, -1.610, -0.409],
+            "centro": [-1.9160, -1.3523, 1.5849, -1.8373, -1.5636, -0.7264],
             "aprox_mano": [-1.4352, -0.8280, 0.9346, -1.6986, -1.4704, 4.3464]
             
         }
@@ -220,9 +220,9 @@ class RobotController:
             0.0,
         ]
 
-        #self.pre_rotate_gripper(angulo_deseado, speed=0.5, acceleration=0.5)
         self.gripper_open()
         self.move_to_fixed_joint("centro_robo")
+        self.pre_rotate_gripper(angulo_deseado, speed=0.5, acceleration=0.5)
         self.move_joint_IK([pose_ficha['x'], pose_ficha['y'], config['Z_APROXIMACION']] + orient, speed=0.15, acceleration=0.1)
         self.move_until_contact([0.0, 0.0, -0.02, 0.0, 0.0, 0.0])
 
@@ -249,12 +249,12 @@ class RobotController:
         pose_base_mano = self.get_current_pose()
         pose_hueco = pose_base_mano[:]
         # "Bajar en Y" para separar las fichas según el hueco
-        pose_hueco[1] -= slot_index * self.MANO_SEPARACION_SLOT
+        pose_hueco[1] -=  slot_index * self.MANO_SEPARACION_SLOT
 
         if slot_index > 0:
             self.move_linear(pose_hueco, speed=0.1, acceleration=0.1)
 
-        self.move_relative_cartesian([-0.05, 0.0, 0, 0.0, 0.0, 0.0], speed=0.05, acceleration=0.05)
+        self.move_relative_cartesian([-0.02, 0.0, 0, 0.0, 0.0, 0.0], speed=0.05, acceleration=0.05)
         self.move_relative_cartesian([0.0, 0.0, -0.03, 0.0, 0.0, 0.0], speed=0.05, acceleration=0.05)
         self.gripper_open(delay=0.5)
         self.gripper_neutral()
@@ -277,6 +277,7 @@ class RobotController:
         
         self.move_to_fixed_joint("mano_jugador_arriba")
         time.sleep(0.5)
+        self.move_relative_cartesian([0.01, 0.00, 0.0, 0.0, 0.0, 0.0], speed=0.05, acceleration=0.05)
 
         pose_base_mano = self.get_current_pose()
         pose_hueco = pose_base_mano[:]
@@ -295,7 +296,7 @@ class RobotController:
 
         # Calcular orientación final
         # La mano está orientada en una pose fija. Para girar la ficha en el tablero:
-        angulo_deseado = math.radians(place_pose['theta']) + math.radians(config['CORRECCION_GRIPPER'])
+        angulo_deseado = math.radians(place_pose['theta']) + math.pi / 2 + math.radians(config['CORRECCION_GRIPPER'])
         orient = [
             math.pi * math.cos(angulo_deseado / 2),
             math.pi * math.sin(angulo_deseado / 2),
@@ -303,6 +304,7 @@ class RobotController:
         ]
 
         print(f"    [CONTROL] Posicionando en tablero con rotación...")
+        #self.pre_rotate_gripper(angulo_deseado, speed=0.5, acceleration=0.5)
         # Nos movemos sobre el destino
         self.move_joint_IK([place_pose['x'], place_pose['y'], 0.12] + orient, speed=0.15, acceleration=0.1)
         

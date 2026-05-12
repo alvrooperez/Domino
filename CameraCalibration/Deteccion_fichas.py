@@ -166,6 +166,7 @@ class DominoDetector:
                 )
 
                 val_1, val_2 = 0, 0
+                sum_x1, sum_y1, sum_x2, sum_y2 = 0.0, 0.0, 0.0, 0.0
                 margen_centro = f_lado_l * self.MARGEN_CENTRO_FACTOR
 
                 for pt_cnt in contours_puntos:
@@ -184,17 +185,28 @@ class DominoDetector:
 
                     if proyeccion > margen_centro:
                         val_1 += 1
+                        sum_x1 += px
+                        sum_y1 += py
                         cv2.circle(res_frame, (px, py), 3, (0, 0, 255), -1)
                     elif proyeccion < -margen_centro:
                         val_2 += 1
+                        sum_x2 += px
+                        sum_y2 += py
                         cv2.circle(res_frame, (px, py), 3, (0, 0, 255), -1)
 
                 val_1, val_2 = min(val_1, 6), min(val_2, 6)
 
+                # fangle_deg ∈ [-90°, 90°) ⟹ vx = cos(fangle_deg) ≥ 0 siempre;
+                # el signo de vx/vy es código muerto o ambiguo. Se comparan
+                # directamente los centroides medios de los puntos de cada mitad.
                 if abs(vx) > abs(vy):
-                    val_primero, val_segundo = (val_1, val_2) if vx < 0 else (val_2, val_1)
+                    cx1 = sum_x1 / val_1 if val_1 > 0 else fcx
+                    cx2 = sum_x2 / val_2 if val_2 > 0 else fcx
+                    val_primero, val_segundo = (val_1, val_2) if cx1 < cx2 else (val_2, val_1)
                 else:
-                    val_primero, val_segundo = (val_1, val_2) if vy < 0 else (val_2, val_1)
+                    cy1 = sum_y1 / val_1 if val_1 > 0 else fcy
+                    cy2 = sum_y2 / val_2 if val_2 > 0 else fcy
+                    val_primero, val_segundo = (val_1, val_2) if cy1 < cy2 else (val_2, val_1)
 
                 texto_ficha = f"[{val_primero}:{val_segundo}]"
                 color = (0, 255, 0)

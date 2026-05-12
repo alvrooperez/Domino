@@ -80,7 +80,7 @@ def run_vision():
             
             # 1. Rotar y Calibrar dinámicamente con ArUcos
             frame = cv2.rotate(frame, cv2.ROTATE_180)
-            calib_model, n_arucos, debug_frame = calibrar_con_arucos(frame, aruco_config)
+            calib_model, n_arucos, debug_frame = calibrar_con_arucos(frame, aruco_config, cap)
             
             if calib_model is None:
                 print(f"[REAL_VISION] ERROR: Solo {n_arucos} ArUcos detectados (necesarios 3) en zona {zone}.")

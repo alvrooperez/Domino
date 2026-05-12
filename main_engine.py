@@ -3,6 +3,7 @@ from tkinter import messagebox
 from collections import deque
 import zmq
 import json
+from time import sleep
 
 class DominoControlPanel:
     def __init__(self, vision_url, control_url):
@@ -23,6 +24,7 @@ class DominoControlPanel:
         self.human_hand_count = 0
         self.is_running = False
         self.boneyard_empty = False
+        self._rendering = False
 
         # --- Interfaz Tkinter ---
         self.root = tk.Tk()
@@ -45,7 +47,7 @@ class DominoControlPanel:
         # Canvas principal
         self.canvas = tk.Canvas(self.root, width=1150, height=600, bg="#2d5a27", highlightthickness=0)
         self.canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
-        self.canvas.bind("<Configure>", lambda e: self.render())
+        self.canvas.bind("<Configure>", self._on_configure)
 
         # Panel de Botones
         btn_frame = tk.Frame(self.root, bg="#1e1e1e")
@@ -65,69 +67,137 @@ class DominoControlPanel:
         tk.Button(btn_frame, text="🛑 PARAR", command=self.emergency_stop, 
                   bg="#dc3545", fg="white", font=("Arial", 10, "bold"), width=10).pack(side="right", padx=5)
 
-    def _draw_tile(self, px, py, t, color="#eee", theta=0.0):
-        # px, py representan el centro geométrico de la ficha en la pantalla
-        if abs(theta) == 90 or abs(theta) == 270:
-            # Orientación HORIZONTAL (Reducida a 30x20 aprox)
-            x1, y1 = px - 20, py - 12
-            x2, y2 = px + 20, py + 12
-            self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="black", width=1)
-            self.canvas.create_text(px - 10, py, text=str(t[0]), font=("Arial", 8, "bold"), fill="black")
-            self.canvas.create_line(px, py - 12, px, py + 12, fill="black")
-            self.canvas.create_text(px + 10, py, text=str(t[1]), font=("Arial", 8, "bold"), fill="black")
-        else:
-            # Orientación VERTICAL (Reducida a 20x30 aprox)
-            x1, y1 = px - 12, py - 20
-            x2, y2 = px + 12, py + 20
-            self.canvas.create_rectangle(x1, y1, x2, y2, fill=color, outline="black", width=1)
-            self.canvas.create_text(px, py - 10, text=str(t[0]), font=("Arial", 8, "bold"), fill="black")
-            self.canvas.create_line(px - 12, py, px + 12, py, fill="black")
-            self.canvas.create_text(px, py + 10, text=str(t[1]), font=("Arial", 8, "bold"), fill="black")
+    def _on_configure(self, event):
+        if not self._rendering:
+            self.render()
 
     def render(self):
-        self.canvas.delete("all")
-        
-        self.canvas.create_text(20, 20, text="MESA DE TRABAJO (Vista Superior):", fill="white", anchor="w", font=("Arial", 10, "bold"))
-        
-        c_w = self.canvas.winfo_width()
-        c_h = self.canvas.winfo_height()
-        if c_w < 100: c_w = 1150
-        if c_h < 100: c_h = 600
+        if self._rendering:
+            return
+        self._rendering = True
+        try:
+            self.canvas.delete("all")
+            c_w = self.canvas.winfo_width()
+            c_h = self.canvas.winfo_height()
+            if c_w < 100: c_w = 1150
+            if c_h < 100: c_h = 600
 
-        # Mapeo ajustado para el rango real del robot (Aprox X: -0.6 a 0.2, Y: 0.2 a 0.7)
-        def map_coords(x_meters, y_meters):
-            # Centramos X=-0.2 en el medio del canvas (c_w/2)
-            # 1 metro = 800 píxeles aprox
-            px = (c_w / 2) + (x_meters + 0.2) * 800
-            # Centramos Y=0.45 en el medio del canvas (c_h/2)
-            py = (c_h / 2) - (y_meters - 0.45) * 800
-            return px, py
+            boneyard_n = len(self.boneyard_poses)
+            self.canvas.create_text(c_w - 15, 15, text=f"Boneyard: {boneyard_n} fichas",
+                                    fill="white", anchor="ne", font=("Arial", 11, "bold"))
+            self.canvas.create_text(c_w - 15, 38, text=f"Mano humano: {self.human_hand_count} fichas",
+                                    fill="yellow", anchor="ne", font=("Arial", 11, "bold"))
+            self._draw_board_chain(c_w, c_h)
+            self._draw_hand_slots(c_w, c_h)
+        finally:
+            self._rendering = False
 
-        # Dibujar Tablero (Fichas en juego)
+    def _draw_board_chain(self, c_w, c_h):
+        LABEL_Y = 65
+        GAP = 3
+        TW_H, TH_H = 80, 40
+        TW_V, TH_V = 40, 80
+        HAND_AREA_TOP = c_h - 120
+
+        self.canvas.create_text(20, LABEL_Y, text="TABLERO:",
+                                fill="white", anchor="w", font=("Arial", 10, "bold"))
+        if not self.board:
+            self.canvas.create_text(c_w / 2, (LABEL_Y + 20 + HAND_AREA_TOP) / 2, text="Tablero vacío",
+                                    fill="#aaa", font=("Arial", 12, "italic"))
+            return
+
+        estimated_w = len(self.board) * (TW_H + GAP)
+        start_x = max(20, c_w / 2 - estimated_w / 2)
+        start_y = (LABEL_Y + 20 + HAND_AREA_TOP) / 2 - TH_H / 2
+        x, y, row_h = start_x, start_y, 0
         for t in self.board:
-            t_str = f"{t[0]}_{t[1]}"
-            if t_str not in self.board_poses: t_str = f"{t[1]}_{t[0]}"
-            pose = self.board_poses.get(t_str, {"x": 0.0, "y": 0.45, "theta": 90.0})
-            px, py = map_coords(pose["x"], pose["y"])
-            self._draw_tile(px, py, t, "white", pose["theta"])
+            t_key = f"{t[0]}_{t[1]}"
+            if t_key not in self.board_poses:
+                t_key = f"{t[1]}_{t[0]}"
+            theta = self.board_poses.get(t_key, {}).get("theta", 0.0)
+            if t[0] == t[1]:
+                horiz = False  # doble: perpendicular a la cadena → estrecho y alto
+            else:
+                horiz = not (abs(theta) == 90 or abs(theta) == 270)
+            tw, th = (TW_H, TH_H) if horiz else (TW_V, TH_V)
+            orient = "H" if horiz else "V"
 
-        # Dibujar Mano Robot
+            if x + tw > c_w - 20 and x > start_x:
+                y += row_h + 12
+                x, row_h = start_x, 0
+            if y + th > HAND_AREA_TOP - 10:
+                break
+            row_h = max(row_h, th)
+
+            cx, cy = x + tw / 2, y + th / 2
+            self.canvas.create_rectangle(x, y, x + tw, y + th,
+                                          fill="white", outline="black", width=2)
+            if horiz:
+                self.canvas.create_text(cx - tw / 4, cy, text=str(t[0]),
+                                        font=("Arial", 10, "bold"), fill="black")
+                self.canvas.create_line(cx, y + 4, cx, y + th - 4, fill="black")
+                self.canvas.create_text(cx + tw / 4, cy, text=str(t[1]),
+                                        font=("Arial", 10, "bold"), fill="black")
+            else:
+                self.canvas.create_text(cx, cy - th / 4, text=str(t[0]),
+                                        font=("Arial", 10, "bold"), fill="black")
+                self.canvas.create_line(x + 4, cy, x + tw - 4, cy, fill="black")
+                self.canvas.create_text(cx, cy + th / 4, text=str(t[1]),
+                                        font=("Arial", 10, "bold"), fill="black")
+            self.canvas.create_text(cx, y + th - 6, text=f"({orient})",
+                                    font=("Arial", 7), fill="#666")
+            x += tw + GAP
+
+    def _draw_hand_slots(self, c_w, c_h):
+        NUM_SLOTS = 7
+        SLOT_W = 110
+        SLOT_H = 70
+        MARGIN = 8
+        total_w = NUM_SLOTS * SLOT_W + (NUM_SLOTS - 1) * MARGIN
+        sx = max(10, (c_w - total_w) / 2)
+        sy = c_h - SLOT_H - 15
+
+        self.canvas.create_text(sx, sy - 16, text="MANO DEL ROBOT:",
+                                fill="white", anchor="w", font=("Arial", 10, "bold"))
+
+        slot_map = {}
+        unslotted = []
         for t in self.hand:
             t_key = f"{t[0]}_{t[1]}"
-            if t_key not in self.robot_hand_poses: t_key = f"{t[1]}_{t[0]}"
-            pose = self.robot_hand_poses.get(t_key, {"x": -0.4, "y": 0.45, "theta": 0.0})
-            px, py = map_coords(pose["x"], pose["y"])
-            self._draw_tile(px, py, t, "#cfcfcf", pose.get("theta", 0.0))
+            if t_key not in self.robot_hand_poses:
+                t_key = f"{t[1]}_{t[0]}"
+            pose = self.robot_hand_poses.get(t_key, {})
+            idx = pose.get("slot_index", None)
+            theta = pose.get("theta", 0.0)
+            if idx is not None and 0 <= idx < NUM_SLOTS:
+                slot_map[idx] = (t, theta)
+            else:
+                unslotted.append((t, theta))
+        for item in unslotted:
+            for i in range(NUM_SLOTS):
+                if i not in slot_map:
+                    slot_map[i] = item
+                    break
 
-        # Dibujar Pozo (Reversos)
-        for clave, pose in self.boneyard_poses.items():
-            px, py = map_coords(pose["x"], pose["y"])
-            self.canvas.create_rectangle(px-20, py-30, px+20, py+30, fill="#2c3e50", outline="white")
-            self.canvas.create_text(px, py, text="?", fill="white", font=("Arial", 12, "bold"))
-        
-        self.canvas.create_text(20, c_h - 30, text=f"FICHAS JUGADOR 2: {self.human_hand_count}", fill="yellow", anchor="w", font=("Arial", 10, "bold"))
-        
-        self.root.update_idletasks()
+        for i in range(NUM_SLOTS):
+            x = sx + i * (SLOT_W + MARGIN)
+            if i in slot_map:
+                t, theta = slot_map[i]
+                orient = "H" if (abs(theta) == 90 or abs(theta) == 270) else "V"
+                self.canvas.create_rectangle(x, sy, x + SLOT_W, sy + SLOT_H,
+                                              fill="#d4e6f1", outline="#2c3e50", width=2)
+                self.canvas.create_text(x + SLOT_W / 2, sy + SLOT_H / 2 - 10,
+                                        text=f"[{t[0]}|{t[1]}]",
+                                        font=("Arial", 13, "bold"), fill="#1a252f")
+                self.canvas.create_text(x + SLOT_W / 2, sy + SLOT_H / 2 + 12,
+                                        text=f"({orient})",
+                                        font=("Arial", 9), fill="#555")
+            else:
+                self.canvas.create_rectangle(x, sy, x + SLOT_W, sy + SLOT_H,
+                                              fill="#444", outline="#777", width=1)
+                self.canvas.create_text(x + SLOT_W / 2, sy + SLOT_H / 2,
+                                        text=str(i),
+                                        font=("Arial", 11), fill="#999")
 
     def scan_zone(self, zone):
         """Mueve el robot a la zona y actualiza el estado desde la visión."""
@@ -137,7 +207,7 @@ class DominoControlPanel:
             print(f"[MOTOR] Moviendo robot a {pos} para escanear {zone}...")
             self.control_sock.send_string(json.dumps({"action": "MOVE_TO_POSITION", "position": pos}))
             self.control_sock.recv_string()
-
+            sleep(5)
             # 2. Pedir estado a la visión
             print(f"[MOTOR] Pidiendo estado de zona {zone}...")
             self.vision_sock.send_string(f"GET_STATE:{zone}")
@@ -212,7 +282,33 @@ class DominoControlPanel:
 
         # 1. Escanear y actualizar UI
         boneyard_empty = self.update_from_vision()
-        
+
+        # --- FASE DE INICIO: mano vacía → robar dos fichas antes de evaluar ---
+        if len(self.hand) == 0:
+            if boneyard_empty:
+                print("[MOTOR] Error: mano vacía y boneyard vacío. Imposible iniciar.")
+                messagebox.showerror("Error de inicio",
+                                     "El boneyard está vacío y el robot no tiene fichas.\n"
+                                     "Imposible iniciar la partida.")
+                self.toggle_autoplay()
+                return
+            print("[MOTOR] Mano vacía. Robando fichas iniciales (slots 0 y 1)...")
+            for slot in range(2):
+                self.scan_zone("BONEYARD")
+                grab = list(self.boneyard_poses.values())[-1] if self.boneyard_poses else None
+                if not grab:
+                    print(f"[MOTOR] Boneyard agotado en slot {slot}, continuando con las fichas disponibles.")
+                    break
+                print(f"[MOTOR] Robando ficha inicial → slot {slot}...")
+                self.control_sock.send_string(json.dumps({
+                    "action": "STEAL",
+                    "grab_pose": grab,
+                    "slot_mano": slot
+                }))
+                self.control_sock.recv_string()
+            boneyard_empty = self.update_from_vision()
+        # -------------------------------------------------------------------
+
         if self.check_win(): return
 
         # --- LÓGICA DE INICIO: Robar hasta tener fichas (ej. 2 para test) ---
@@ -232,6 +328,7 @@ class DominoControlPanel:
                     "slot_mano": next_slot
                 }))
                 self.control_sock.recv_string()
+
                 self.update_from_vision()
                 self.root.after(500, self.game_loop) # Continuar robando
                 return
