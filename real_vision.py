@@ -43,8 +43,8 @@ def run_vision():
 
     # Inicializar Cámara
     cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_V4L2)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  2304)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1296)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1920)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
     
     context = zmq.Context()
     socket_motor = context.socket(zmq.REP)
@@ -68,7 +68,7 @@ def run_vision():
             aruco_config = configs[zone]
             
             # 0. Estabilización de la cámara (esperar a que el robot pare y la cámara enfoque)
-            time.sleep(1.5)
+            time.sleep(5)
             # Limpiar buffer de la cámara (leer frames viejos)
             for _ in range(5): cap.read()
             
@@ -123,11 +123,10 @@ def run_vision():
 
             robot_hand = []
             robot_hand_poses = {}
-            for i, (clave, pose) in enumerate(hand_list):
+            for clave, pose in hand_list:
                 if not clave.startswith("reverso"):
                     val1, val2 = map(int, clave.split('_'))
                     robot_hand.append([val1, val2])
-                    pose['slot_index'] = i
                     robot_hand_poses[clave] = pose
 
             board = []

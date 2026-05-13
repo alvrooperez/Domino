@@ -6,6 +6,12 @@ import json
 from time import sleep
 
 class DominoControlPanel:
+    FICHAS_INICIALES = 2  # modificable para pruebas
+
+    TABLERO_CENTRO_X  = 0.0     # X del centro del tablero en TCP (metros)
+    TABLERO_CENTRO_Y  = 0.37   # Y del centro del tablero en TCP (metros)
+    SEPARACION_FICHAS = 0.06    # distancia centro a centro entre fichas consecutivas (metros)
+
     def __init__(self, vision_url, control_url):
         # --- Conexiones ZMQ ---
         context = zmq.Context()
@@ -25,6 +31,10 @@ class DominoControlPanel:
         self.is_running = False
         self.boneyard_empty = False
         self._rendering = False
+        self.fichas_en_mano = 0
+        self.partida_iniciada = False
+        self._center_index = 0  # índice de la ficha central dentro de self.board
+        self.slot_map = {}      # {clave_ficha: slot_index} — gestionado por el motor
 
         # --- Interfaz Tkinter ---
         self.root = tk.Tk()
@@ -60,11 +70,15 @@ class DominoControlPanel:
                   bg="#007bff", fg="white", font=("Arial", 10, "bold"), width=22, state=tk.DISABLED)
         self.btn_human.pack(side="left", padx=10)
         
-        self.btn_play = tk.Button(btn_frame, text="▶️ INICIAR AUTOMÁTICO", command=self.toggle_autoplay, 
+        self.btn_play = tk.Button(btn_frame, text="▶️ INICIAR AUTOMÁTICO", command=self.toggle_autoplay,
                   bg="#28a745", fg="white", font=("Arial", 11, "bold"), width=22)
         self.btn_play.pack(side="left", padx=10)
 
-        tk.Button(btn_frame, text="🛑 PARAR", command=self.emergency_stop, 
+        self.btn_comenzar = tk.Button(btn_frame, text="🎮 COMENZAR", command=self.comenzar_partida,
+                  bg="#555", fg="#aaa", font=("Arial", 11, "bold"), width=18, state=tk.DISABLED)
+        self.btn_comenzar.pack(side="left", padx=10)
+
+        tk.Button(btn_frame, text="🛑 PARAR", command=self.emergency_stop,
                   bg="#dc3545", fg="white", font=("Arial", 10, "bold"), width=10).pack(side="right", padx=5)
 
     def _on_configure(self, event):
@@ -164,10 +178,10 @@ class DominoControlPanel:
         unslotted = []
         for t in self.hand:
             t_key = f"{t[0]}_{t[1]}"
-            if t_key not in self.robot_hand_poses:
+            if t_key not in self.slot_map:
                 t_key = f"{t[1]}_{t[0]}"
             pose = self.robot_hand_poses.get(t_key, {})
-            idx = pose.get("slot_index", None)
+            idx = self.slot_map.get(t_key)
             theta = pose.get("theta", 0.0)
             if idx is not None and 0 <= idx < NUM_SLOTS:
                 slot_map[idx] = (t, theta)
@@ -207,7 +221,6 @@ class DominoControlPanel:
             print(f"[MOTOR] Moviendo robot a {pos} para escanear {zone}...")
             self.control_sock.send_string(json.dumps({"action": "MOVE_TO_POSITION", "position": pos}))
             self.control_sock.recv_string()
-            sleep(5)
             # 2. Pedir estado a la visión
             print(f"[MOTOR] Pidiendo estado de zona {zone}...")
             self.vision_sock.send_string(f"GET_STATE:{zone}")
@@ -238,7 +251,9 @@ class DominoControlPanel:
         return self.scan_zone("BOARD")
 
     def check_win(self):
-        if len(self.hand) == 0:
+        if not self.partida_iniciada:
+            return False
+        if self.fichas_en_mano == 0:
             self.emergency_stop()
             messagebox.showinfo("🏆 FIN DEL JUEGO", "¡El ROBOT ha ganado! Se ha quedado sin fichas.")
             return True
@@ -261,7 +276,12 @@ class DominoControlPanel:
         self.lbl_turn.config(fg="#00ff00")
         self.btn_human.config(state=tk.DISABLED)
         
+        old_left = list(self.board[0]) if self.board else None
+        old_len  = len(self.board)
         self.update_from_vision()
+        if len(self.board) > old_len and old_left is not None:
+            if list(self.board[0]) != old_left:
+                self._center_index += 1
         if self.check_win(): return
 
         if self.is_running:
@@ -278,26 +298,23 @@ class DominoControlPanel:
 
     def game_loop(self):
         if not self.is_running: return
-        if self.turn == "HUMANO": return 
+        if self.turn == "HUMANO": return
 
-        # 1. Escanear y actualizar UI
-        boneyard_empty = self.update_from_vision()
-
-        # --- FASE DE INICIO: mano vacía → robar dos fichas antes de evaluar ---
-        if len(self.hand) == 0:
-            if boneyard_empty:
-                print("[MOTOR] Error: mano vacía y boneyard vacío. Imposible iniciar.")
+        # ── FASE DE INICIO: robar FICHAS_INICIALES antes de empezar ──────────
+        if not self.partida_iniciada and self.fichas_en_mano == 0:
+            self.scan_zone("BONEYARD")
+            if self.boneyard_empty:
+                print("[MOTOR] Error: boneyard vacío al inicio. Imposible iniciar.")
                 messagebox.showerror("Error de inicio",
                                      "El boneyard está vacío y el robot no tiene fichas.\n"
                                      "Imposible iniciar la partida.")
                 self.toggle_autoplay()
                 return
-            print("[MOTOR] Mano vacía. Robando fichas iniciales (slots 0 y 1)...")
-            for slot in range(2):
+            for slot in range(self.FICHAS_INICIALES):
                 self.scan_zone("BONEYARD")
                 grab = list(self.boneyard_poses.values())[-1] if self.boneyard_poses else None
                 if not grab:
-                    print(f"[MOTOR] Boneyard agotado en slot {slot}, continuando con las fichas disponibles.")
+                    print(f"[MOTOR] Boneyard agotado tras {self.fichas_en_mano} fichas.")
                     break
                 print(f"[MOTOR] Robando ficha inicial → slot {slot}...")
                 self.control_sock.send_string(json.dumps({
@@ -306,53 +323,44 @@ class DominoControlPanel:
                     "slot_mano": slot
                 }))
                 self.control_sock.recv_string()
-            boneyard_empty = self.update_from_vision()
-        # -------------------------------------------------------------------
+                self.fichas_en_mano += 1
+            self.update_from_vision()
+            sorted_poses = sorted(self.robot_hand_poses.items(), key=lambda kv: kv[1]['y'], reverse=True)
+            self.slot_map = {clave: idx for idx, (clave, _) in enumerate(sorted_poses)}
+            print(f"[MOTOR] slot_map inicial: {self.slot_map}")
+            self.scan_zone("BONEYARD")
+            self.is_running = False
+            self.btn_play.config(text="▶️ CONTINUAR", bg="#28a745", fg="white")
+            self.btn_comenzar.config(state=tk.NORMAL, bg="#17a2b8", fg="white")
+            self.turn_var.set(f"✅ {self.fichas_en_mano} fichas recogidas. Pulsa COMENZAR para iniciar.")
+            self.lbl_turn.config(fg="#ffc107")
+            return
+        # ─────────────────────────────────────────────────────────────────────
+
+        # 1. Escanear y actualizar UI
+        boneyard_empty = self.update_from_vision()
 
         if self.check_win(): return
 
-        # --- LÓGICA DE INICIO: Robar hasta tener fichas (ej. 2 para test) ---
-        if len(self.hand) < 2 and not boneyard_empty:
-            print(f"[MOTOR] Robando ficha inicial ({len(self.hand)+1}/2)...")
-            
-            # Escanear el pozo para encontrar fichas
-            self.scan_zone("BONEYARD")
-            
-            # Coordenada origen: Cualquier ficha disponible en el pozo
-            grab = list(self.boneyard_poses.values())[-1] if self.boneyard_poses else None
-            if grab:
-                next_slot = len(self.hand)
-                self.control_sock.send_string(json.dumps({
-                    "action": "STEAL",
-                    "grab_pose": grab,
-                    "slot_mano": next_slot
-                }))
-                self.control_sock.recv_string()
-
-                self.update_from_vision()
-                self.root.after(500, self.game_loop) # Continuar robando
-                return
-        # ---------------------------------------------------------
-
         # 2. Lógica de juego normal
         move = self.calculate_logic()
-        
+
         if move:
-            # Adjuntamos la posición física simulada de la ficha para que el brazo sepa a dónde ir
             t_key = f"{move['tile'][0]}_{move['tile'][1]}"
-            if t_key not in self.robot_hand_poses: t_key = f"{move['tile'][1]}_{move['tile'][0]}"
-            
+            if t_key not in self.slot_map: t_key = f"{move['tile'][1]}_{move['tile'][0]}"
+
             print(f"[UI] Decisión: Mover {move['tile']} al lado {move['side']}.")
             self.control_sock.send_string(json.dumps(move))
-            self.control_sock.recv_string() # Esperar a que el UR3e termine
+            self.control_sock.recv_string()
+            self.slot_map.pop(t_key, None)
+            self.fichas_en_mano -= 1
+            if move["side"] == "L" and len(self.board) > 0:
+                self._center_index += 1
         elif not boneyard_empty:
-            # Escanear el pozo para encontrar fichas
             self.scan_zone("BONEYARD")
-            
-            # Coordenada origen: Cualquier ficha disponible en el pozo
             grab = list(self.boneyard_poses.values())[-1] if self.boneyard_poses else None
             if grab:
-                next_slot = len(self.hand)
+                next_slot = next((i for i in range(7) if i not in self.slot_map.values()), len(self.slot_map))
                 print(f"[UI] Decisión: Robar ficha a slot {next_slot}")
                 self.control_sock.send_string(json.dumps({
                     "action": "STEAL",
@@ -360,20 +368,26 @@ class DominoControlPanel:
                     "slot_mano": next_slot
                 }))
                 self.control_sock.recv_string()
+                self.fichas_en_mano += 1
+                old_keys = set(self.slot_map.keys())
                 self.update_from_vision()
+                for k in self.robot_hand_poses:
+                    if k not in old_keys and "_".join(reversed(k.split("_"))) not in old_keys:
+                        self.slot_map[k] = next_slot
+                        break
         else:
             print("[UI] Bloqueado. Fin.")
-            self.toggle_autoplay() # Parar bucle
+            self.toggle_autoplay()
             return
 
         # Actualizar UI inmediatamente después del movimiento del brazo
         self.update_from_vision()
-        
+
         # --- PASAR TURNO AL HUMANO ---
         self.turn = "HUMANO"
         self.turn_var.set("🙋‍♂️ TURNO: JUGADOR 2")
-        self.lbl_turn.config(fg="#007bff") # Azul para el humano
-        self.btn_human.config(state=tk.NORMAL) # Habilitamos el botón
+        self.lbl_turn.config(fg="#007bff")
+        self.btn_human.config(state=tk.NORMAL)
 
     def calculate_logic(self):
         """
@@ -383,17 +397,16 @@ class DominoControlPanel:
         if not self.board: 
             print("[LÓGICA] Tablero vacío. Robot empieza con su primera ficha.")
             t = self.hand[0]
-            # Usar slot_index real si está disponible
             t_key = f"{t[0]}_{t[1]}"
-            if t_key not in self.robot_hand_poses: t_key = f"{t[1]}_{t[0]}"
-            slot_real = self.robot_hand_poses.get(t_key, {}).get("slot_index", 0)
+            if t_key not in self.slot_map: t_key = f"{t[1]}_{t[0]}"
+            slot_real = self.slot_map.get(t_key, 0)
             
             # Orientación corregida: Normal = 0.0, Doble = 90.0
             target_theta = 90.0 if t[0] == t[1] else 0.0
             
             return {
                 "action": "MOVE", "tile": t, "side": "L",
-                "place_pose": {"x": 0.0, "y": 0.45, "theta": target_theta},
+                "place_pose": {"x": self.TABLERO_CENTRO_X, "y": self.TABLERO_CENTRO_Y, "theta": target_theta},
                 "slot_mano": slot_real, "slot_tablero": 0
             }
 
@@ -403,55 +416,51 @@ class DominoControlPanel:
         # Buscar en la mano
         for i, t in enumerate(self.hand):
             t_key = f"{t[0]}_{t[1]}"
-            if t_key not in self.robot_hand_poses: t_key = f"{t[1]}_{t[0]}"
-            slot_real = self.robot_hand_poses.get(t_key, {}).get("slot_index", i)
+            if t_key not in self.slot_map: t_key = f"{t[1]}_{t[0]}"
+            slot_real = self.slot_map.get(t_key, i)
 
             # --- OPCIÓN 1: LADO IZQUIERDO ---
             if t[0] == l_v or t[1] == l_v:
-                l_tile_data = self.board[0]
-                l_key = f"{l_tile_data[0]}_{l_tile_data[1]}"
-                if l_key not in self.board_poses: l_key = f"{l_tile_data[1]}_{l_tile_data[0]}"
-                l_pose = self.board_poses.get(l_key, {"x": 0.0, "y": 0.45, "theta": 0.0})
-                
                 # Orientación: Doble = 90. Normal = 0 o 180.
                 if t[0] == t[1]:
                     target_theta = 90.0
                 else:
-                    # Si t[1] == l_v, la ficha está bien orientada (val1 a la izq, val2 a la derecha conectando con l_v)
-                    # Si t[0] == l_v, hay que girarla 180.
                     target_theta = 180.0 if t[0] == l_v else 0.0
-                
+
+                x_dest = self.TABLERO_CENTRO_X - (self._center_index + 1) * self.SEPARACION_FICHAS
                 print(f"[LÓGICA] Juego {t} en LADO IZQUIERDO. Conecta {l_v}. Theta={target_theta}")
                 return {
                     "action": "MOVE", "tile": t, "side": "L",
-                    "place_pose": {"x": l_pose["x"] - 0.06, "y": l_pose["y"], "theta": target_theta},
+                    "place_pose": {"x": x_dest, "y": self.TABLERO_CENTRO_Y, "theta": target_theta},
                     "slot_mano": slot_real, "slot_tablero": 0
                 }
 
             # --- OPCIÓN 2: LADO DERECHO ---
             if t[0] == r_v or t[1] == r_v:
-                r_tile_data = self.board[-1]
-                r_key = f"{r_tile_data[0]}_{r_tile_data[1]}"
-                if r_key not in self.board_poses: r_key = f"{r_tile_data[1]}_{r_tile_data[0]}"
-                r_pose = self.board_poses.get(r_key, {"x": 0.0, "y": 0.45, "theta": 0.0})
-                
                 # Orientación: Doble = 90. Normal = 0 o 180.
                 if t[0] == t[1]:
                     target_theta = 90.0
                 else:
-                    # Si t[0] == r_v, la ficha conecta t[0] con r_v, val2 queda a la derecha.
-                    # Si t[1] == r_v, hay que girarla 180.
                     target_theta = 180.0 if t[1] == r_v else 0.0
-                
+
+                right_count = len(self.board) - 1 - self._center_index
+                x_dest = self.TABLERO_CENTRO_X + (right_count + 1) * self.SEPARACION_FICHAS
                 print(f"[LÓGICA] Juego {t} en LADO DERECHO. Conecta {r_v}. Theta={target_theta}")
                 return {
                     "action": "MOVE", "tile": t, "side": "R",
-                    "place_pose": {"x": r_pose["x"] + 0.06, "y": r_pose["y"], "theta": target_theta},
+                    "place_pose": {"x": x_dest, "y": self.TABLERO_CENTRO_Y, "theta": target_theta},
                     "slot_mano": slot_real, "slot_tablero": len(self.board)
                 }
 
         print("[LÓGICA] No hay jugadas posibles en la mano.")
         return None
+
+    def comenzar_partida(self):
+        self.partida_iniciada = True
+        self.btn_comenzar.config(state=tk.DISABLED, bg="#555", fg="#aaa")
+        self.turn_var.set("🤖 TURNO: ROBOT")
+        self.lbl_turn.config(fg="#00ff00")
+        self.toggle_autoplay()
 
     def emergency_stop(self):
         self.is_running = False

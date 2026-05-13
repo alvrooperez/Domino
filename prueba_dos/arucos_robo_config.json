@@ -20,8 +20,8 @@
     "z_fija": 0.039,
     "camera_index": 2,
     "resolution": [
-        2304,
-        1296
+        1920,
+        1080
     ],
     "dict_type": "DICT_4X4_50"
 }

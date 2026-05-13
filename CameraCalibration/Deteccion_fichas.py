@@ -10,7 +10,7 @@ class DominoDetector:
         self.MAX_AREA_PUNTO = 500
         self.MAX_EXCENTRICIDAD_PUNTO = 0.85
         self.MIN_AREA_FICHA_ENTERA = 1
-        self.MAX_AREA_FICHA_ENTERA = 35000   # descarta blobs grandes (mesa, pared)
+        self.MAX_AREA_FICHA_ENTERA = 15000   # descarta blobs grandes (mesa, pared)
         self.MIN_RATIO_ASPECTO = 1.5         # ficha dominó ~2:1
         self.MAX_RATIO_ASPECTO = 3.5
         self.UMBRAL_STDDEV_REVERSO = 10.0
@@ -24,16 +24,33 @@ class DominoDetector:
         if self.calib_model is None:
             return float(u), float(v), 0.0
         m = self.calib_model
+        if "H" in m:
+            H   = np.array(m["H"], dtype=np.float64)
+            src = np.array([[[u, v]]], dtype=np.float32)
+            dst = cv2.perspectiveTransform(src, H)
+            return float(dst[0, 0, 0]), float(dst[0, 0, 1]), float(m["z_fija"])
         x = m["coef_x"][0] * u + m["coef_x"][1] * v + m["intercept_x"]
         y = m["coef_y"][0] * u + m["coef_y"][1] * v + m["intercept_y"]
         return float(x), float(y), float(m["z_fija"])
 
-    def _angle_to_robot(self, angle_deg: float) -> float:
+    def _angle_to_robot(self, angle_deg: float, u: float = 0.0, v: float = 0.0) -> float:
         """Convierte ángulo de imagen al espacio del robot via Jacobiano de calibración."""
         if self.calib_model is None:
             return angle_deg
-        m = self.calib_model
+        m   = self.calib_model
         rad = np.deg2rad(angle_deg)
+        if "H" in m:
+            h    = np.array(m["H"], dtype=np.float64).flatten()
+            w    = h[6]*u + h[7]*v + h[8]
+            Xp   = h[0]*u + h[1]*v + h[2]
+            Yp   = h[3]*u + h[4]*v + h[5]
+            dXdu = (h[0]*w - Xp*h[6]) / w**2
+            dXdv = (h[1]*w - Xp*h[7]) / w**2
+            dYdu = (h[3]*w - Yp*h[6]) / w**2
+            dYdv = (h[4]*w - Yp*h[7]) / w**2
+            dx_r = dXdu*np.cos(rad) + dXdv*np.sin(rad)
+            dy_r = dYdu*np.cos(rad) + dYdv*np.sin(rad)
+            return float(np.rad2deg(np.arctan2(dy_r, dx_r)))
         dx_r = m["coef_x"][0] * np.cos(rad) + m["coef_x"][1] * np.sin(rad)
         dy_r = m["coef_y"][0] * np.cos(rad) + m["coef_y"][1] * np.sin(rad)
         return float(np.rad2deg(np.arctan2(dy_r, dx_r)))
@@ -241,7 +258,9 @@ class DominoDetector:
             py2 = int(pos_y + Lp * np.sin(perp_rad))
             cv2.arrowedLine(res_frame, (pos_x, pos_y), (px2, py2), (255, 0, 255), 2, tipLength=0.3)
             # Ángulo imagen (amarillo) y ángulo robot (cyan) sobre la ficha
-            theta_rob = self._angle_to_robot(fangle_deg)
+            theta_rob = self._angle_to_robot(fangle_deg,
+                                              fcx * self._scale_u,
+                                              fcy * self._scale_v)
             cv2.putText(res_frame, f"img:{fangle_deg:.0f}", (pos_x - 28, pos_y - 22),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
             cv2.putText(res_frame, f"rob:{theta_rob:.0f}", (pos_x - 28, pos_y - 8),
@@ -270,7 +289,7 @@ class DominoDetector:
             u_orig = f['x'] * getattr(self, '_scale_u', 1.0)
             v_orig = f['y'] * getattr(self, '_scale_v', 1.0)
             tcp_x, tcp_y, _ = self._pixel_to_tcp(u_orig, v_orig)
-            theta_robot = self._angle_to_robot(f['angulo'])
+            theta_robot = self._angle_to_robot(f['angulo'], u_orig, v_orig)
             print(f"  [{clave}] pixel_800x600=({f['x']},{f['y']})  "
                   f"pixel_nativo=({u_orig:.0f},{v_orig:.0f})  "
                   f"TCP=({tcp_x:.4f}, {tcp_y:.4f})")
@@ -296,8 +315,8 @@ if __name__ == "__main__":
 
     detector = DominoDetector(calib_model=calib_model)
     cap = cv2.VideoCapture(3, cv2.CAP_V4L2)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  9999)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 9999)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1920)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
     time.sleep(2)
 
     if not cap.isOpened():

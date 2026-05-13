@@ -37,7 +37,7 @@ class RobotController:
         }
         
         # Distancia entre los centros de los huecos de la mano del jugador (en metros)
-        self.MANO_SEPARACION_SLOT = 0.04 # Ejemplo: 5 cm
+        self.MANO_SEPARACION_SLOT = 0.05 # Ejemplo: 5 cm
 
         # Diccionario de posiciones cartesianas fijas guardadas (TCP Pose: X, Y, Z, Rx, Ry, Rz)
         self.fixed_cartesian_positions = {
@@ -221,8 +221,10 @@ class RobotController:
         ]
 
         self.gripper_open()
+        pose_ficha['x'] += 0.015
+        pose_ficha['y'] += 0.02
         self.move_to_fixed_joint("centro_robo")
-        self.pre_rotate_gripper(angulo_deseado, speed=0.5, acceleration=0.5)
+        #self.pre_rotate_gripper(angulo_deseado, speed=0.5, acceleration=0.5)
         self.move_joint_IK([pose_ficha['x'], pose_ficha['y'], config['Z_APROXIMACION']] + orient, speed=0.15, acceleration=0.1)
         self.move_until_contact([0.0, 0.0, -0.02, 0.0, 0.0, 0.0])
 
