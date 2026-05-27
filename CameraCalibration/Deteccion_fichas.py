@@ -7,14 +7,14 @@ import json
 class DominoDetector:
     def __init__(self, calib_model: dict = None):
         self.MIN_AREA_PUNTO = 10
-        self.MAX_AREA_PUNTO = 500
+        self.MAX_AREA_PUNTO = 800
         self.MAX_EXCENTRICIDAD_PUNTO = 0.85
         self.MIN_AREA_FICHA_ENTERA = 1
         self.MAX_AREA_FICHA_ENTERA = 15000   # descarta blobs grandes (mesa, pared)
         self.MIN_RATIO_ASPECTO = 1.5         # ficha dominó ~2:1
         self.MAX_RATIO_ASPECTO = 3.5
         self.UMBRAL_STDDEV_REVERSO = 10.0
-        self.MARGEN_CENTRO_FACTOR = 0.08  # Fix #4: era 0.05, demasiado estrecho
+        self.MARGEN_CENTRO_FACTOR = 0.05
         self.calib_model = calib_model   # Fix #1 y #2: modelo pixel→TCP
 
     # ── Conversión de coordenadas ──────────────────────────────────────────────
@@ -149,7 +149,7 @@ class DominoDetector:
 
         # --- 4. CLASIFICACIÓN Y LECTURA DE PUNTOS ---
         mask_oscuras = cv2.adaptiveThreshold(
-            g_channel, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 21, 8
+            g_channel, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 8
         )
 
         fichas_temporales = []
@@ -314,7 +314,7 @@ if __name__ == "__main__":
         calib_model = None
 
     detector = DominoDetector(calib_model=calib_model)
-    cap = cv2.VideoCapture(3, cv2.CAP_V4L2)
+    cap = cv2.VideoCapture(2, cv2.CAP_V4L2)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1920)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
     time.sleep(2)

@@ -6,7 +6,7 @@ import json
 from time import sleep
 
 class DominoControlPanel:
-    FICHAS_INICIALES = 2  # modificable para pruebas
+    FICHAS_INICIALES = 5  # modificable para pruebas
 
     TABLERO_CENTRO_X  = 0.0     # X del centro del tablero en TCP (metros)
     TABLERO_CENTRO_Y  = 0.37   # Y del centro del tablero en TCP (metros)
@@ -82,6 +82,10 @@ class DominoControlPanel:
                   bg="#dc3545", fg="white", font=("Arial", 10, "bold"), width=10).pack(side="right", padx=5)
 
     def _on_configure(self, event):
+        if not self._rendering:
+            self.root.after_idle(self._deferred_render)
+
+    def _deferred_render(self):
         if not self._rendering:
             self.render()
 
@@ -241,7 +245,7 @@ class DominoControlPanel:
                 self.boneyard_poses = data.get("boneyard_poses", {})
                 self.boneyard_empty = data.get("boneyard_empty", False)
             
-            self.render()
+            self.root.after(0, self.render)
             return self.boneyard_empty
         except Exception as e:
             print(f"[MOTOR] Error escaneando {zone}: {e}")
@@ -297,97 +301,110 @@ class DominoControlPanel:
             self.btn_play.config(text="▶️ CONTINUAR", bg="#28a745", fg="white")
 
     def game_loop(self):
-        if not self.is_running: return
-        if self.turn == "HUMANO": return
+        try:
+            if not self.is_running: return
+            if self.turn == "HUMANO": return
 
-        # ── FASE DE INICIO: robar FICHAS_INICIALES antes de empezar ──────────
-        if not self.partida_iniciada and self.fichas_en_mano == 0:
-            self.scan_zone("BONEYARD")
-            if self.boneyard_empty:
-                print("[MOTOR] Error: boneyard vacío al inicio. Imposible iniciar.")
-                messagebox.showerror("Error de inicio",
-                                     "El boneyard está vacío y el robot no tiene fichas.\n"
-                                     "Imposible iniciar la partida.")
-                self.toggle_autoplay()
+            # ── FASE DE INICIO: robar FICHAS_INICIALES antes de empezar ──────────
+            if not self.partida_iniciada and self.fichas_en_mano == 0:
+                self.scan_zone("BONEYARD")
+                if self.boneyard_empty:
+                    print("[MOTOR] Error: boneyard vacío al inicio. Imposible iniciar.")
+                    messagebox.showerror("Error de inicio",
+                                         "El boneyard está vacío y el robot no tiene fichas.\n"
+                                         "Imposible iniciar la partida.")
+                    self.toggle_autoplay()
+                    return
+                for slot in range(self.FICHAS_INICIALES):
+                    self.scan_zone("BONEYARD")
+                    grab = list(self.boneyard_poses.values())[-1] if self.boneyard_poses else None
+                    if not grab:
+                        print(f"[MOTOR] Boneyard agotado tras {self.fichas_en_mano} fichas.")
+                        break
+                    print(f"[MOTOR] Robando ficha inicial → slot {slot}...")
+                    self.control_sock.send_string(json.dumps({
+                        "action": "STEAL",
+                        "grab_pose": grab,
+                        "slot_mano": slot
+                    }))
+                    self.control_sock.recv_string()
+                    self.fichas_en_mano += 1
+                self.update_from_vision()
+                sorted_poses = sorted(self.robot_hand_poses.items(), key=lambda kv: kv[1]['y'], reverse=True)
+                self.slot_map = {clave: idx for idx, (clave, _) in enumerate(sorted_poses)}
+                print(f"[MOTOR] slot_map inicial: {self.slot_map}")
+                self.is_running = False
+                self.btn_play.config(text="▶️ CONTINUAR", bg="#28a745", fg="white")
+                self.btn_comenzar.config(state=tk.NORMAL, bg="#17a2b8", fg="white")
+                self.turn_var.set(f"✅ {self.fichas_en_mano} fichas recogidas. Pulsa COMENZAR para iniciar.")
+                self.lbl_turn.config(fg="#ffc107")
                 return
-            for slot in range(self.FICHAS_INICIALES):
+            # ─────────────────────────────────────────────────────────────────────
+
+            # 1. Escanear y actualizar UI
+            boneyard_empty = self.update_from_vision()
+
+            if self.check_win(): return
+
+            # 2. Lógica de juego normal
+            move = self.calculate_logic()
+
+            if move:
+                t_key = f"{move['tile'][0]}_{move['tile'][1]}"
+                if t_key not in self.slot_map: t_key = f"{move['tile'][1]}_{move['tile'][0]}"
+
+                print(f"[UI] Decisión: Mover {move['tile']} al lado {move['side']}.")
+                self.control_sock.send_string(json.dumps(move))
+                self.control_sock.recv_string()
+                self.slot_map.pop(t_key, None)
+                self.fichas_en_mano -= 1
+                if move["side"] == "L" and len(self.board) > 0:
+                    self._center_index += 1
+            elif not boneyard_empty:
                 self.scan_zone("BONEYARD")
                 grab = list(self.boneyard_poses.values())[-1] if self.boneyard_poses else None
-                if not grab:
-                    print(f"[MOTOR] Boneyard agotado tras {self.fichas_en_mano} fichas.")
-                    break
-                print(f"[MOTOR] Robando ficha inicial → slot {slot}...")
-                self.control_sock.send_string(json.dumps({
-                    "action": "STEAL",
-                    "grab_pose": grab,
-                    "slot_mano": slot
-                }))
-                self.control_sock.recv_string()
-                self.fichas_en_mano += 1
+                if grab:
+                    next_slot = next((i for i in range(7) if i not in self.slot_map.values()), len(self.slot_map))
+                    print(f"[UI] Decisión: Robar ficha a slot {next_slot}")
+                    self.control_sock.send_string(json.dumps({
+                        "action": "STEAL",
+                        "grab_pose": grab,
+                        "slot_mano": next_slot
+                    }))
+                    self.control_sock.recv_string()
+                    self.fichas_en_mano += 1
+                    old_keys = set(self.slot_map.keys())
+                    self.update_from_vision()
+                    for k in self.robot_hand_poses:
+                        if k not in old_keys and "_".join(reversed(k.split("_"))) not in old_keys:
+                            self.slot_map[k] = next_slot
+                            break
+                    move = self.calculate_logic()
+                    if move:
+                        t_key = f"{move['tile'][0]}_{move['tile'][1]}"
+                        if t_key not in self.slot_map: t_key = f"{move['tile'][1]}_{move['tile'][0]}"
+                        print(f"[UI] Ficha robada permite jugar {move['tile']} al lado {move['side']}.")
+                        self.control_sock.send_string(json.dumps(move))
+                        self.control_sock.recv_string()
+                        self.slot_map.pop(t_key, None)
+                        self.fichas_en_mano -= 1
+                        if move["side"] == "L" and len(self.board) > 0:
+                            self._center_index += 1
+            else:
+                print("[UI] Bloqueado. Fin.")
+                self.toggle_autoplay()
+                return
+
+            # Actualizar UI inmediatamente después del movimiento del brazo
             self.update_from_vision()
-            sorted_poses = sorted(self.robot_hand_poses.items(), key=lambda kv: kv[1]['y'], reverse=True)
-            self.slot_map = {clave: idx for idx, (clave, _) in enumerate(sorted_poses)}
-            print(f"[MOTOR] slot_map inicial: {self.slot_map}")
-            self.scan_zone("BONEYARD")
-            self.is_running = False
-            self.btn_play.config(text="▶️ CONTINUAR", bg="#28a745", fg="white")
-            self.btn_comenzar.config(state=tk.NORMAL, bg="#17a2b8", fg="white")
-            self.turn_var.set(f"✅ {self.fichas_en_mano} fichas recogidas. Pulsa COMENZAR para iniciar.")
-            self.lbl_turn.config(fg="#ffc107")
-            return
-        # ─────────────────────────────────────────────────────────────────────
 
-        # 1. Escanear y actualizar UI
-        boneyard_empty = self.update_from_vision()
-
-        if self.check_win(): return
-
-        # 2. Lógica de juego normal
-        move = self.calculate_logic()
-
-        if move:
-            t_key = f"{move['tile'][0]}_{move['tile'][1]}"
-            if t_key not in self.slot_map: t_key = f"{move['tile'][1]}_{move['tile'][0]}"
-
-            print(f"[UI] Decisión: Mover {move['tile']} al lado {move['side']}.")
-            self.control_sock.send_string(json.dumps(move))
-            self.control_sock.recv_string()
-            self.slot_map.pop(t_key, None)
-            self.fichas_en_mano -= 1
-            if move["side"] == "L" and len(self.board) > 0:
-                self._center_index += 1
-        elif not boneyard_empty:
-            self.scan_zone("BONEYARD")
-            grab = list(self.boneyard_poses.values())[-1] if self.boneyard_poses else None
-            if grab:
-                next_slot = next((i for i in range(7) if i not in self.slot_map.values()), len(self.slot_map))
-                print(f"[UI] Decisión: Robar ficha a slot {next_slot}")
-                self.control_sock.send_string(json.dumps({
-                    "action": "STEAL",
-                    "grab_pose": grab,
-                    "slot_mano": next_slot
-                }))
-                self.control_sock.recv_string()
-                self.fichas_en_mano += 1
-                old_keys = set(self.slot_map.keys())
-                self.update_from_vision()
-                for k in self.robot_hand_poses:
-                    if k not in old_keys and "_".join(reversed(k.split("_"))) not in old_keys:
-                        self.slot_map[k] = next_slot
-                        break
-        else:
-            print("[UI] Bloqueado. Fin.")
-            self.toggle_autoplay()
-            return
-
-        # Actualizar UI inmediatamente después del movimiento del brazo
-        self.update_from_vision()
-
-        # --- PASAR TURNO AL HUMANO ---
-        self.turn = "HUMANO"
-        self.turn_var.set("🙋‍♂️ TURNO: JUGADOR 2")
-        self.lbl_turn.config(fg="#007bff")
-        self.btn_human.config(state=tk.NORMAL)
+            # --- PASAR TURNO AL HUMANO ---
+            self.turn = "HUMANO"
+            self.turn_var.set("🙋‍♂️ TURNO: JUGADOR 2")
+            self.lbl_turn.config(fg="#007bff")
+            self.btn_human.config(state=tk.NORMAL)
+        except Exception as e:
+            print(f"[MOTOR] Error en game_loop (ignorado): {e}")
 
     def calculate_logic(self):
         """

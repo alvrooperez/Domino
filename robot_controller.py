@@ -26,6 +26,7 @@ class RobotController:
             "centro_robo":[1.2493, -1.1963, 1.2690, -1.5500, -1.6455, -0.3917],
             "pre_volteo": [-1.779, -0.753, 1.003, -0.246, 1.341, 2.757],
             "post_volteo": [-1.846, -0.7, 1.229, -0.630, -0.321, 2.757],
+            #"post_volteo": [-1.7390, -0.6802, 1.1985, -1.1090, -0.1314, 3.3645],
             "intermedio_volteo": [-0.1998, -1.5025, 1.5685, -1.5495, -1.6455, -0.3917],
             # RELLENAR: Mover el robot a una posición segura sobre el primer hueco de la mano
             # y anotar aquí los valores de las articulaciones.
