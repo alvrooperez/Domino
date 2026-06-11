@@ -6,7 +6,7 @@ import json
 from time import sleep
 
 class DominoControlPanel:
-    FICHAS_INICIALES = 5  # modificable para pruebas
+    FICHAS_INICIALES = 3  # modificable para pruebas
 
     TABLERO_CENTRO_X  = 0.0     # X del centro del tablero en TCP (metros)
     TABLERO_CENTRO_Y  = 0.37   # Y del centro del tablero en TCP (metros)
